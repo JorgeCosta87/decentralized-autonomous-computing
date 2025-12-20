@@ -1,8 +1,8 @@
-# Decentralized autonomous computing - System Overview
+# Sol-Mind Protocol - System Overview
 
 ## Introduction
 
-Decentralized autonomous computing (DAC) network built on Solana. The protocol enables secure, verifiable execution of AI agent tasks using Trusted Execution Environments (TEEs) and implements a payment system for compute resources.
+Sol-Mind Protocol is a decentralized autonomous computing (DAC) network built on Solana. The protocol enables secure, verifiable execution of AI agent tasks using Trusted Execution Environments (TEEs) and implements a payment system for compute resources.
 
 ## Core Components
 
@@ -64,15 +64,14 @@ Authority initializes network with approved code measurements and pre-allocates 
 ## Documentation
 
 ### State Diagrams
-- [Agent States](./docs/diagrams/agent_state.svg)
-- [Goal States](./docs/diagrams/goal_state.svg)
-- [Task States](./docs/diagrams/task_state.svg)
-- [NodeInfo States](./docs/diagrams/node_info_state.svg)
+- [Agent States](./diagrams/agent-states.md#agent-state-machine)
+- [Goal States](./diagrams/goal-states.md#goal-state-machine)
+- [Task States](./diagrams/task-states.md#task-state-machine)
+- [NodeInfo States](./diagrams/node-registration.md#nodeinfo-state-machine)
 
 ### Workflow Diagrams
-- [Network Initialization](./docs/diagrams/network_init_sequence.svg)
-- [Validator Sequence](./docs/diagrams/validator_sequence.svg)
-- [Compute Node Sequence](./docs/diagrams/compute_node_sequence.svg)
-- [Task Execution](./docs/diagrams/task_sequence.svg)
-- [Validation Flow](./docs/diagrams/validation_flow.svg)
-- [Payment System](./docs/diagrams/payment_sequence.svg)
+- [Network Initialization](./diagrams/network-initialization.md)
+- [Node Registration](./diagrams/node-registration.md)
+- [Task Execution](./diagrams/task-execution.md)
+- [Validation Flow](./diagrams/validation-flow.md)
+- [Payment System](./diagrams/payment-system.md)
