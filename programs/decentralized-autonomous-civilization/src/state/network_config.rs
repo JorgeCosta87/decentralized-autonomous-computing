@@ -1,5 +1,6 @@
 use crate::utils::SemanticVersion;
 use anchor_lang::prelude::*;
+use sha2::{Sha256, Digest};
 
 #[derive(InitSpace, AnchorSerialize, AnchorDeserialize, Clone, Copy)]
 pub struct CodeMeasurement {
@@ -10,8 +11,10 @@ pub struct CodeMeasurement {
 #[account]
 #[derive(InitSpace)]
 pub struct NetworkConfig {
+    pub authority: Pubkey,
     #[max_len(128)]
     pub cid_config: String,
+    pub genesis_hash: [u8; 32],
     pub agent_count: u64,
     pub goal_count: u64,
     pub task_count: u64,
@@ -46,12 +49,13 @@ impl NetworkConfig {
         self.approved_code_measurements.first()
     }
 
-    pub fn get_measurement_by_version(
-        &self,
-        version: &SemanticVersion,
-    ) -> Option<&CodeMeasurement> {
-        self.approved_code_measurements
-            .iter()
-            .find(|m| &m.version == version)
+    pub fn compute_genesis_hash(&self, authority: &Pubkey) -> Result<[u8; 32]> {
+        let clock = Clock::get()?;
+        let mut hasher = Sha256::new();
+        hasher.update(b"DAC_GENESIS");
+        hasher.update(authority.as_ref());
+        hasher.update(&clock.unix_timestamp.to_le_bytes());
+        Ok(hasher.finalize().into())
     }
+
 }

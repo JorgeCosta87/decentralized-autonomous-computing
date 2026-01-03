@@ -22,6 +22,7 @@ custom-panic = []
 
 [dependencies]
 anchor-lang = "0.32.1"
+sha2 = "0.10"
 
 
 [lints.rust]

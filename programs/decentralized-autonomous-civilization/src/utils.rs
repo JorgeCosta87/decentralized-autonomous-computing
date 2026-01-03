@@ -38,7 +38,6 @@ impl Ord for SemanticVersion {
     }
 }
 
-
 pub fn init_dynamic_pda<'info>(
     payer: &Signer<'info>,
     target_account: &AccountInfo<'info>,

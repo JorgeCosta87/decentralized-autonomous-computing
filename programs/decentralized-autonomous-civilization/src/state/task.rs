@@ -27,6 +27,10 @@ pub struct Task {
     pub input_cid: Option<String>,
     #[max_len(128)]
     pub output_cid: Option<String>,
+    #[max_len(128)]
+    pub pending_input_cid: Option<String>,
+    #[max_len(128)]
+    pub pending_output_cid: Option<String>,
     pub chain_proof: [u8; 32],
     pub execution_count: u64,
     pub bump: u8,
