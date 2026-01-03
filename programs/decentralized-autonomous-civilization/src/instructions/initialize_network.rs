@@ -44,7 +44,7 @@ impl<'info> InitializeNetwork<'info> {
             ErrorCode::TooManyCodeMeasurements
         );
 
-        let genesis_hash = self.network_config.compute_genesis_hash(&self.authority.key())?;
+        let genesis_hash = self.network_config.compute_genesis_hash()?;
         
         self.network_config.set_inner(NetworkConfig {
             authority: self.authority.key(),

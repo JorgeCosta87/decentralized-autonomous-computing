@@ -49,12 +49,9 @@ impl NetworkConfig {
         self.approved_code_measurements.first()
     }
 
-    pub fn compute_genesis_hash(&self, authority: &Pubkey) -> Result<[u8; 32]> {
-        let clock = Clock::get()?;
+    pub fn compute_genesis_hash(&self) -> Result<[u8; 32]> {
         let mut hasher = Sha256::new();
         hasher.update(b"DAC_GENESIS");
-        hasher.update(authority.as_ref());
-        hasher.update(&clock.unix_timestamp.to_le_bytes());
         Ok(hasher.finalize().into())
     }
 
