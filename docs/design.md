@@ -15,7 +15,7 @@ Existing AI agent systems face several critical challenges:
 ### Functional Requirements
 
 1. **Network Initialization**
-   - Authority can initialize network with approved TEE code measurements
+   - Authority can initialize network with approved TEE code measurements and network configuration
    - Pre-allocation of goal and task slots for efficient resource management
 
 2. **Node Management**
@@ -105,21 +105,23 @@ The system follows a modular architecture with three main layers:
 
 ## Architecture Specification
 
-### Account Specifications
-
-Each account specification includes its structure, state machine (if applicable), and operational sequences.
 
 ### NetworkConfig
 
 Global network configuration account that tracks system-wide statistics and approved code measurements. This is the root account initialized once during network setup.
 
 The NetworkConfig PDA stores:
+- `netowrk_config_cid`: IPFS CID of network configuration
 - `agent_count`: Current number of registered agents
 - `goal_count`: Current number of goals
 - `task_count`: Current number of tasks
 - `validator_node_count`: Current number of active validator nodes
 - `compute_node_count`: Current number of active compute nodes
-- `approved_code_measurements`: List of approved TEE code measurements (max 10)
+- `approved_code_measurements`: Vector of approved TEE code measurements (max 10)
+  - Each entry contains: `measurement` (32 bytes) and `version` (semantic version: major.minor.patch)
+  - Newest measurements are always at the beginning (index 0)
+  - When adding a new measurement and vector is full, oldest measurement is removed
+  - Versions use semantic versioning (major: u16, minor: u16, patch: u16)
 - `bump`: NetworkConfig PDA bump seed
 
 Seeds: `["network_config"]`
@@ -131,7 +133,7 @@ sequenceDiagram
     participant Auth as Authority
     participant DAC as Smart Contract
     
-    Auth->>DAC: initialize_network(allocate_goals, allocate_tasks, approved_code_measurements)
+    Auth->>DAC: initialize_network(cid_config, allocate_goals, allocate_tasks, approved_code_measurements)
     DAC->>DAC: Create NetworkConfig<br/>Set agent_count = 0<br/>goal_count = allocate_goals<br/>task_count = allocate_tasks<br/>Store approved_code_measurements
     
     loop For each goal (0..allocate_goals)

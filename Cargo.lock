@@ -452,7 +452,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "decentralized-autonomous-computing"
+name = "decentralized-autonomous-civilization"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
