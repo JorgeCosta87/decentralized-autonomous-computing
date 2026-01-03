@@ -141,7 +141,7 @@ sequenceDiagram
     end
     
     loop For each task (0..allocate_tasks)
-        DAC->>DAC: Create TaskData PDA<br/>task_slot_id = task_id<br/>status = Ready
+        DAC->>DAC: Create Task PDA<br/>task_slot_id = task_id<br/>status = Ready
     end
     
     DAC->>Auth: Network initialized
@@ -362,11 +362,11 @@ sequenceDiagram
     DAC->>DAC: Set status = Completed
 ```
 
-### TaskData
+### Task
 
 Task execution account that tracks the lifecycle of individual tasks. Tasks are pre-allocated during network initialization and reused across goal iterations.
 
-The TaskData PDA stores:
+The Task PDA stores:
 - `task_slot_id`: Unique slot identifier for the task
 - `action_type`: Type of action (e.g., LLM)
 - `agent`: Associated agent public key
@@ -376,9 +376,9 @@ The TaskData PDA stores:
 - `output_cid`: IPFS CID of task output data (optional)
 - `chain_proof`: SHA256 hash proof for validation
 - `execution_count`: Number of times task has been executed
-- `bump`: TaskData PDA bump seed
+- `bump`: Task PDA bump seed
 
-Seeds: `["task_data", network_config, task_slot_id.to_le_bytes()]`
+Seeds: `["task", network_config, task_slot_id.to_le_bytes()]`
 
 #### State
 
@@ -404,12 +404,12 @@ sequenceDiagram
     participant LLM as LLM
     participant VN as Validator Node (TEE)
     
-    CN->>RPC: Subscribe to TaskData account changes<br/>(status = Pending)
-    VN->>RPC: Subscribe to TaskData status changes<br/>(AwaitingValidation)
+    CN->>RPC: Subscribe to Task account changes<br/>(status = Pending)
+    VN->>RPC: Subscribe to Task status changes<br/>(AwaitingValidation)
     
     Note over DAC: Task already exists<br/>status = Pending<br/>input_cid and output_cid set
     
-    RPC->>CN: Notify TaskData status change<br/>(Pending)
+    RPC->>CN: Notify Task status change<br/>(Pending)
     
     CN->>DAC: claim_task(compute_node)
     DAC->>DAC: Set compute_node<br/>Set status = Processing
@@ -444,7 +444,7 @@ sequenceDiagram
     CN->>DAC: submit_task_result(input_cid, output_cid)
     DAC->>DAC: Store input and output_cid<br/>Set status = AwaitingValidation
     
-    RPC->>VN: Notify TaskData status change<br/>(AwaitingValidation)
+    RPC->>VN: Notify Task status change<br/>(AwaitingValidation)
     
     VN->>IPFS: Fetch input_cid and output_cid
     IPFS->>VN: Return input and output data
