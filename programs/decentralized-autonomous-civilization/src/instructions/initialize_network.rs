@@ -35,12 +35,12 @@ impl<'info> InitializeNetwork<'info> {
     ) -> Result<()> {
         require!(
             approved_code_measurements.len() > 0,
-            ErrorCode::InvalidTeeProof
+            ErrorCode::NeedAtLeastOneCodeMeasurement
         );
         
         require!(
             approved_code_measurements.len() <= 10,
-            ErrorCode::InvalidTeeProof
+            ErrorCode::TooManyCodeMeasurements
         );
         
         // Initialize network config
