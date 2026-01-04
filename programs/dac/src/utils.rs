@@ -50,7 +50,7 @@ pub fn init_dynamic_pda<'info>(
     require_keys_eq!(target_account.key(), pda, ErrorCode::InvalidPDAAccount);
 
     if target_account.lamports() > 0 && !target_account.data_is_empty() {
-         return Err(ErrorCode::AccountAlreadyInitialized.into());
+        return Err(ErrorCode::AccountAlreadyInitialized.into());
     }
 
     let rent = Rent::get()?;
@@ -65,18 +65,10 @@ pub fn init_dynamic_pda<'info>(
         from: payer.to_account_info(),
         to: target_account.clone(),
     };
-    let cpi_context = CpiContext::new_with_signer(
-        system_program.to_account_info(),
-        cpi_accounts,
-        signer_seeds,
-    );
+    let cpi_context =
+        CpiContext::new_with_signer(system_program.to_account_info(), cpi_accounts, signer_seeds);
 
-    system_program::create_account(
-        cpi_context,
-        required_lamports,
-        space as u64,
-        owner,
-    )?;
+    system_program::create_account(cpi_context, required_lamports, space as u64, owner)?;
 
     Ok(bump)
 }

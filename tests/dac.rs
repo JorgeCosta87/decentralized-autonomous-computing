@@ -1,12 +1,11 @@
-use crate::setup::TestFixture;
+use crate::setup::test_data::*;
 use crate::setup::Accounts;
 use crate::setup::Instructions;
-use crate::setup::test_data::*;
+use crate::setup::TestFixture;
 use solana_sdk::signature::Signer;
 use utils::Utils;
 
 mod setup;
-
 
 #[test]
 fn test_initialize_network_without_remaining_accounts() {
@@ -38,8 +37,11 @@ fn test_initialize_network_without_remaining_accounts() {
             assert_eq!(network_config.agent_count, 0);
             assert_eq!(network_config.goal_count, allocate_goals);
             assert_eq!(network_config.task_count, allocate_tasks);
-            assert_eq!(network_config.approved_code_measurements, DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec());
-        },
+            assert_eq!(
+                network_config.approved_code_measurements,
+                DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec()
+            );
+        }
         Err(e) => panic!("Failed to initialize network: {:#?}", e),
     }
 }
@@ -79,8 +81,11 @@ fn test_initialize_network_with_remaining_accounts() {
             assert_eq!(network_config.agent_count, 0);
             assert_eq!(network_config.goal_count, allocate_goals);
             assert_eq!(network_config.task_count, allocate_tasks);
-            assert_eq!(network_config.approved_code_measurements, DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec());
-        },
+            assert_eq!(
+                network_config.approved_code_measurements,
+                DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec()
+            );
+        }
         Err(e) => panic!("Failed to initialize network: {:#?}", e),
     }
 }

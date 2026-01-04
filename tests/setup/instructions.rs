@@ -1,17 +1,16 @@
+use dac_client::dac::instructions::InitializeNetworkBuilder;
+use dac_client::dac::types::CodeMeasurement;
 use litesvm::types::TransactionResult;
 use solana_sdk::{
     instruction::AccountMeta,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
 };
-use dac_client::dac::instructions::InitializeNetworkBuilder;
-use dac_client::dac::types::CodeMeasurement;
 use utils::Utils;
 
 use crate::setup::test_data::*;
-use crate::setup::TestFixture;
 use crate::setup::Accounts;
-
+use crate::setup::TestFixture;
 
 pub trait Instructions {
     fn initialize_network(
@@ -24,9 +23,7 @@ pub trait Instructions {
         approved_code_measurements: Vec<CodeMeasurement>,
         remaining_accounts: &[AccountMeta],
     ) -> TransactionResult;
-    fn initialize_network_with_defaults(
-        &mut self,
-    ) -> TransactionResult;
+    fn initialize_network_with_defaults(&mut self) -> TransactionResult;
 }
 
 impl Instructions for TestFixture {
@@ -55,19 +52,18 @@ impl Instructions for TestFixture {
             builder.add_remaining_accounts(remaining_accounts);
         }
 
-        self.svm.send_tx(&[builder.instruction()], &authority_pubkey, &[authority])
+        self.svm
+            .send_tx(&[builder.instruction()], &authority_pubkey, &[authority])
     }
-    fn initialize_network_with_defaults(
-        &mut self,
-    ) -> TransactionResult {
+    fn initialize_network_with_defaults(&mut self) -> TransactionResult {
         let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
-        
+
         let remaining_accounts = self.create_remaining_accounts_for_initialize(
             &network_config_pda,
             DEFAULT_ALLOCATE_GOALS,
             DEFAULT_ALLOCATE_TASKS,
         );
-    
+
         self.initialize_network(
             &self.authority.insecure_clone(),
             &network_config_pda,

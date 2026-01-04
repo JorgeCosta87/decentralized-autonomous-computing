@@ -1,4 +1,3 @@
-
 use litesvm::{
     types::{TransactionMetadata, TransactionResult},
     LiteSVM,
@@ -10,12 +9,16 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-
 pub trait Utils {
     fn deploy_program_from_keypair(&mut self, keypair_path: &str, so_path: &str) -> Pubkey;
     fn deploy_program_from_id(&mut self, program_id: Pubkey, so_path: &str) -> Pubkey;
     fn print_transaction_logs(&self, result: &TransactionMetadata);
-    fn send_tx(&mut self, instructions: &[Instruction], payer: &Pubkey, signing_keypairs: &[&Keypair]) -> TransactionResult;
+    fn send_tx(
+        &mut self,
+        instructions: &[Instruction],
+        payer: &Pubkey,
+        signing_keypairs: &[&Keypair],
+    ) -> TransactionResult;
     fn get_lamports(&self, address: &Pubkey) -> u64;
 }
 
@@ -46,10 +49,13 @@ impl Utils for LiteSVM {
         signing_keypairs: &[&Keypair],
     ) -> TransactionResult {
         let blockhash = self.latest_blockhash();
-        let tx =
-            Transaction::new_signed_with_payer(instructions, Some(payer), signing_keypairs, blockhash);
+        let tx = Transaction::new_signed_with_payer(
+            instructions,
+            Some(payer),
+            signing_keypairs,
+            blockhash,
+        );
         let result = self.send_transaction(tx);
-
 
         result
     }

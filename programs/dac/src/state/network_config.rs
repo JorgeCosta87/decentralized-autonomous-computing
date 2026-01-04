@@ -1,6 +1,6 @@
 use crate::utils::SemanticVersion;
 use anchor_lang::prelude::*;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 #[derive(InitSpace, AnchorSerialize, AnchorDeserialize, Clone, Copy)]
 pub struct CodeMeasurement {
@@ -54,5 +54,4 @@ impl NetworkConfig {
         hasher.update(b"DAC_GENESIS");
         Ok(hasher.finalize().into())
     }
-
 }

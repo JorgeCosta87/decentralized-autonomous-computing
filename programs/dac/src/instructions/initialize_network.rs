@@ -1,17 +1,16 @@
 use anchor_lang::prelude::*;
 
-
-use crate::ActionType;
-use crate::utils::init_dynamic_pda;
 use crate::errors::ErrorCode;
-use crate::state::{NetworkConfig, Goal, GoalStatus, Task, TaskStatus, CodeMeasurement};
+use crate::state::{CodeMeasurement, Goal, GoalStatus, NetworkConfig, Task, TaskStatus};
+use crate::utils::init_dynamic_pda;
+use crate::ActionType;
 
 #[derive(Accounts)]
 #[instruction(allocate_goals: u64, allocate_tasks: u64)]
 pub struct InitializeNetwork<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
-    
+
     #[account(
         init,
         payer = authority,
@@ -20,7 +19,7 @@ pub struct InitializeNetwork<'info> {
         bump,
     )]
     pub network_config: Account<'info, NetworkConfig>,
-    
+
     pub system_program: Program<'info, System>,
 }
 
@@ -38,14 +37,14 @@ impl<'info> InitializeNetwork<'info> {
             !approved_code_measurements.is_empty(),
             ErrorCode::NeedAtLeastOneCodeMeasurement
         );
-        
+
         require!(
             approved_code_measurements.len() <= 10,
             ErrorCode::TooManyCodeMeasurements
         );
 
         let genesis_hash = self.network_config.compute_genesis_hash()?;
-        
+
         self.network_config.set_inner(NetworkConfig {
             authority: self.authority.key(),
             cid_config: cid_config,
@@ -58,9 +57,9 @@ impl<'info> InitializeNetwork<'info> {
             approved_code_measurements: approved_code_measurements,
             bump: bumps.network_config,
         });
-        
+
         let mut account_offset = 0;
-        
+
         account_offset += Self::pre_allocate_goals(
             &remaining_accounts[account_offset..],
             &self.authority,
@@ -69,7 +68,7 @@ impl<'info> InitializeNetwork<'info> {
             allocate_goals,
             &self.system_program,
         )?;
-        
+
         Self::pre_allocate_tasks(
             &remaining_accounts[account_offset..],
             &self.authority,
@@ -78,10 +77,10 @@ impl<'info> InitializeNetwork<'info> {
             allocate_tasks,
             &self.system_program,
         )?;
-        
+
         Ok(())
     }
-    
+
     fn pre_allocate_goals(
         remaining_accounts: &[AccountInfo<'info>],
         authority: &Signer<'info>,
@@ -91,18 +90,14 @@ impl<'info> InitializeNetwork<'info> {
         system_program: &Program<'info, System>,
     ) -> Result<usize> {
         let mut account_index = 0;
-        
+
         for goal_id in 0..allocate_goals {
             let goal_account_info = remaining_accounts
                 .get(account_index)
                 .ok_or(ErrorCode::MissingAccount)?;
             account_index += 1;
 
-            let seeds = &[
-                b"goal",
-                network_config_key.as_ref(),
-                &goal_id.to_le_bytes(),
-            ];
+            let seeds = &[b"goal", network_config_key.as_ref(), &goal_id.to_le_bytes()];
 
             let bump = init_dynamic_pda(
                 authority,
@@ -129,13 +124,13 @@ impl<'info> InitializeNetwork<'info> {
                 locked_for_tasks: 0,
                 bump,
             };
-            
+
             goal_data.try_serialize(&mut *goal_account_info.try_borrow_mut_data()?)?;
         }
-        
+
         Ok(account_index)
     }
-    
+
     fn pre_allocate_tasks(
         remaining_accounts: &[AccountInfo<'info>],
         authority: &Signer<'info>,
@@ -149,11 +144,7 @@ impl<'info> InitializeNetwork<'info> {
                 .get(task_id as usize)
                 .ok_or(ErrorCode::MissingAccount)?;
 
-            let seeds = &[
-                b"task",
-                network_config_key.as_ref(),
-                &task_id.to_le_bytes(),
-            ];
+            let seeds = &[b"task", network_config_key.as_ref(), &task_id.to_le_bytes()];
 
             let bump = init_dynamic_pda(
                 authority,
@@ -182,8 +173,7 @@ impl<'info> InitializeNetwork<'info> {
 
             task_data.try_serialize(&mut *task_account_info.try_borrow_mut_data()?)?;
         }
-        
+
         Ok(())
     }
 }
-
