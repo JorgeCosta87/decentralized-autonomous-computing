@@ -125,6 +125,8 @@ impl<'info> InitializeNetwork<'info> {
                 task_index_at_goal_start: 0,
                 task_index_at_goal_end: 0,
                 chain_proof: genesis_hash,
+                total_shares: 0,
+                locked_for_tasks: 0,
                 bump,
             };
             
@@ -174,6 +176,7 @@ impl<'info> InitializeNetwork<'info> {
                 agent: Pubkey::default(),
                 compute_node: None,
                 execution_count: 0,
+                max_task_cost: 0,
                 bump,
             };
 

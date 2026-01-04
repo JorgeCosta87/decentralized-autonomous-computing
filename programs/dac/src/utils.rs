@@ -45,7 +45,7 @@ pub fn init_dynamic_pda<'info>(
     space: usize,
     owner: &Pubkey,
     system_program: &Program<'info, System>,
-) -> Result<(u8)> {
+) -> Result<u8> {
     let (pda, bump) = Pubkey::find_program_address(seeds, &crate::ID);
     require_keys_eq!(target_account.key(), pda, ErrorCode::InvalidPDAAccount);
 
@@ -78,5 +78,5 @@ pub fn init_dynamic_pda<'info>(
         owner,
     )?;
 
-    Ok((bump))
+    Ok(bump)
 }

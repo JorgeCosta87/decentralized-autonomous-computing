@@ -33,5 +33,6 @@ pub struct Task {
     pub pending_output_cid: Option<String>,
     pub chain_proof: [u8; 32],
     pub execution_count: u64,
+    pub max_task_cost: u64,
     pub bump: u8,
 }
