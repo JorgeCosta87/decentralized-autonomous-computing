@@ -1,12 +1,12 @@
 [package]
-name = "decentralized-autonomous-computing"
+name = "dac"
 version = "0.1.0"
 description = "Created with Anchor"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "decentralized_autonomous_computing"
+name = "dac"
 
 [features]
 default = []
@@ -22,6 +22,7 @@ custom-panic = []
 
 [dependencies]
 anchor-lang = "0.32.1"
+sha2 = "0.10"
 
 
 [lints.rust]

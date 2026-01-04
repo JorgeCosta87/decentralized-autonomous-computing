@@ -1,0 +1,22 @@
+{
+    "idl": "target/idl/dac.json",
+    "before": [],
+    "scripts": {
+        "js": {
+            "from": "@codama/renderers-js",
+            "args": [
+                "clients/sdk/src/generated/dac"
+            ]
+        },
+        "rust": {
+            "from": "@codama/renderers-rust",
+            "args": [
+                "clients/rust/src/generated/dac",
+                {
+                    "crateFolder": "clients/rust",
+                    "formatCode": true
+                }
+            ]
+        }
+    }
+}

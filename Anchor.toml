@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-decentralized_autonomous_computing = "ANgS5PVGWJ72rBbidEgpp1CKYjDs1sXNNyDEwW4cfSjx"
+dac = "C821M111okror4TN2gjdUBJK58Mbd2s94pZc8xH6S5BQ"
 
 [registry]
 url = "https://api.apr.dev"
@@ -16,4 +16,6 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 \"tests/**/*.ts\""
+build = "bash scripts/build_and_generate_clients.sh"
+test = "cargo test"
+test-verbose = "cargo test -- --show-output"
