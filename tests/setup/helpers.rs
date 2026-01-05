@@ -11,7 +11,7 @@ pub struct ValidateComputeNodeMessage {
 pub struct Helpers;
 
 impl Helpers {
-    pub fn create_ed25519_instruction_for_validate_compute_node(
+    pub fn create_ed25519_instruction_to_validate_compute_node(
         compute_node_pubkey: &Pubkey,
         approved: bool,
         signing_keypair: &Keypair,

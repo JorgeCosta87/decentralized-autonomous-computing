@@ -56,4 +56,8 @@ pub mod dac {
     pub fn validate_compute_node(ctx: Context<ValidateComputeNode>) -> Result<()> {
         ctx.accounts.validate_compute_node()
     }
+
+    pub fn create_agent(ctx: Context<CreateAgent>, agent_config_cid: String) -> Result<()> {
+        ctx.accounts.create_agent(agent_config_cid, &ctx.bumps)
+    }
 }

@@ -27,3 +27,6 @@ pub fn compute_genesis_hash() -> [u8; 32] {
 // Node test data
 pub const DEFAULT_NODE_INFO_CID: &str = "QmNodeInfoCID";
 pub const DEFAULT_CODE_MEASUREMENT: [u8; 32] = [1u8; 32];
+
+// Agent test data
+pub const DEFAULT_AGENT_CONFIG_CID: &str = "QmAgentConfigCID";

@@ -232,7 +232,7 @@ fn test_validate_compute_node() {
         .with_register_compute_node()
         .with_claim_compute_node();
 
-    let ed25519_ix = Helpers::create_ed25519_instruction_for_validate_compute_node(
+    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
         &fixt.compute_node.pubkey(),
         true,
         &fixt.tee_signing_keypair.insecure_clone(),
@@ -267,7 +267,7 @@ fn test_validate_compute_node_not_approved() {
         .with_register_compute_node()
         .with_claim_compute_node();
 
-    let ed25519_ix = Helpers::create_ed25519_instruction_for_validate_compute_node(
+    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
         &fixt.compute_node.pubkey(),
         false,
         &fixt.tee_signing_keypair.insecure_clone(),
@@ -303,7 +303,7 @@ fn test_wrong_tee_signing_pubkey() {
 
     let attacker_tee_keypair = fixt.create_keypair();
 
-    let ed25519_ix = Helpers::create_ed25519_instruction_for_validate_compute_node(
+    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
         &fixt.compute_node.pubkey(),
         true,
         &attacker_tee_keypair,
@@ -332,7 +332,7 @@ fn test_wrong_compute_node_pubkey() {
 
     let diferent_compute_node = fixt.create_keypair();
 
-    let ed25519_ix = Helpers::create_ed25519_instruction_for_validate_compute_node(
+    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
         &diferent_compute_node.pubkey(),
         true,
         &fixt.tee_signing_keypair.insecure_clone(),
@@ -356,7 +356,7 @@ fn test_inactive_validator() {
         .with_initialize_network()
         .with_register_validator_node();
 
-    let ed25519_ix = Helpers::create_ed25519_instruction_for_validate_compute_node(
+    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
         &fixt.compute_node.pubkey(),
         true,
         &fixt.tee_signing_keypair.insecure_clone(),
@@ -371,5 +371,64 @@ fn test_inactive_validator() {
     assert!(
         result.is_err(),
         "should fail because validator node is not active"
+    );
+}
+
+#[test]
+fn test_create_agent() {
+    let mut fixt = TestFixture::new().with_initialize_network();
+
+    let authority = fixt.authority.insecure_clone();
+    let agent_owner = fixt.agent_owner.insecure_clone();
+    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+
+    let result = fixt.create_agent(&agent_owner, DEFAULT_AGENT_CONFIG_CID.to_string());
+
+    match result {
+        Ok(_) => {
+            fixt.svm.print_transaction_logs(&result.unwrap());
+            let network_config = fixt.get_network_config(&authority.pubkey());
+            let agent = fixt.get_agent(&network_config_pda, 0);
+
+            assert_eq!(agent.agent_slot_id, 0);
+            assert_eq!(agent.owner, agent_owner.pubkey());
+            assert_eq!(agent.agent_config_cid, DEFAULT_AGENT_CONFIG_CID.to_string());
+            assert_eq!(agent.agent_memory_cid, None);
+            assert_eq!(agent.status, dac_client::dac::types::AgentStatus::Pending);
+            assert_eq!(network_config.agent_count, 1);
+        }
+        Err(e) => panic!("Failed to create agent: {:#?}", e),
+    }
+}
+
+#[test]
+fn test_create_multiple_agents() {
+    let mut fixt = TestFixture::new().with_initialize_network();
+
+    let authority = fixt.authority.insecure_clone();
+    let agent_owner = fixt.agent_owner.insecure_clone();
+    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+
+    let result1 = fixt.create_agent(&agent_owner, DEFAULT_AGENT_CONFIG_CID.to_string());
+    assert!(result1.is_ok(), "Failed to create first agent");
+
+    let result2 = fixt.create_agent(&agent_owner, "QmSecondAgentConfigCID".to_string());
+    assert!(result2.is_ok(), "Failed to create second agent");
+
+    let network_config = fixt.get_network_config(&authority.pubkey());
+    assert_eq!(network_config.agent_count, 2);
+
+    let agent0 = fixt.get_agent(&network_config_pda, 0);
+    assert_eq!(agent0.agent_slot_id, 0);
+    assert_eq!(
+        agent0.agent_config_cid,
+        DEFAULT_AGENT_CONFIG_CID.to_string()
+    );
+
+    let agent1 = fixt.get_agent(&network_config_pda, 1);
+    assert_eq!(agent1.agent_slot_id, 1);
+    assert_eq!(
+        agent1.agent_config_cid,
+        "QmSecondAgentConfigCID".to_string()
     );
 }
