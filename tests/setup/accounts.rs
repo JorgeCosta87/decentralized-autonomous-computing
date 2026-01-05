@@ -3,7 +3,6 @@ use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey};
 
 use crate::setup::TestFixture;
 
-
 pub trait Accounts {
     fn find_network_config_pda(&self, authority: &Pubkey) -> (Pubkey, u8);
     fn get_network_config(&self, authority: &Pubkey) -> NetworkConfig;
@@ -118,7 +117,11 @@ impl Accounts for TestFixture {
     }
 
     fn find_agent_pda(&self, network_config: &Pubkey, agent_slot_id: u64) -> (Pubkey, u8) {
-        let seeds = &[b"agent", network_config.as_ref(), &agent_slot_id.to_le_bytes()];
+        let seeds = &[
+            b"agent",
+            network_config.as_ref(),
+            &agent_slot_id.to_le_bytes(),
+        ];
         Pubkey::find_program_address(seeds, &self.program_id)
     }
 
@@ -130,7 +133,6 @@ impl Accounts for TestFixture {
             .get_account(&addr)
             .expect("Agent account not found");
 
-        Agent::from_bytes(&account.data)
-            .expect("Failed to deserialize Agent account")
+        Agent::from_bytes(&account.data).expect("Failed to deserialize Agent account")
     }
 }

@@ -46,7 +46,7 @@ impl<'info> ClaimValidatorNode<'info> {
         self.node_info.code_measurement = Some(code_measurement);
         self.node_info.tee_signing_pubkey = Some(tee_signing_pubkey);
         self.node_info.status = NodeStatus::Active;
-        
+
         self.network_config.increment_validator_node_count()?;
 
         Ok(())

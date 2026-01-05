@@ -382,10 +382,7 @@ fn test_create_agent() {
     let agent_owner = fixt.agent_owner.insecure_clone();
     let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
 
-    let result = fixt.create_agent(
-        &agent_owner,
-        DEFAULT_AGENT_CONFIG_CID.to_string(),
-    );
+    let result = fixt.create_agent(&agent_owner, DEFAULT_AGENT_CONFIG_CID.to_string());
 
     match result {
         Ok(_) => {
@@ -397,10 +394,7 @@ fn test_create_agent() {
             assert_eq!(agent.owner, agent_owner.pubkey());
             assert_eq!(agent.agent_config_cid, DEFAULT_AGENT_CONFIG_CID.to_string());
             assert_eq!(agent.agent_memory_cid, None);
-            assert_eq!(
-                agent.status,
-                dac_client::dac::types::AgentStatus::Pending
-            );
+            assert_eq!(agent.status, dac_client::dac::types::AgentStatus::Pending);
             assert_eq!(network_config.agent_count, 1);
         }
         Err(e) => panic!("Failed to create agent: {:#?}", e),
@@ -415,16 +409,10 @@ fn test_create_multiple_agents() {
     let agent_owner = fixt.agent_owner.insecure_clone();
     let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
 
-    let result1 = fixt.create_agent(
-        &agent_owner,
-        DEFAULT_AGENT_CONFIG_CID.to_string(),
-    );
+    let result1 = fixt.create_agent(&agent_owner, DEFAULT_AGENT_CONFIG_CID.to_string());
     assert!(result1.is_ok(), "Failed to create first agent");
 
-    let result2 = fixt.create_agent(
-        &agent_owner,
-        "QmSecondAgentConfigCID".to_string(),
-    );
+    let result2 = fixt.create_agent(&agent_owner, "QmSecondAgentConfigCID".to_string());
     assert!(result2.is_ok(), "Failed to create second agent");
 
     let network_config = fixt.get_network_config(&authority.pubkey());
@@ -432,9 +420,15 @@ fn test_create_multiple_agents() {
 
     let agent0 = fixt.get_agent(&network_config_pda, 0);
     assert_eq!(agent0.agent_slot_id, 0);
-    assert_eq!(agent0.agent_config_cid, DEFAULT_AGENT_CONFIG_CID.to_string());
+    assert_eq!(
+        agent0.agent_config_cid,
+        DEFAULT_AGENT_CONFIG_CID.to_string()
+    );
 
     let agent1 = fixt.get_agent(&network_config_pda, 1);
     assert_eq!(agent1.agent_slot_id, 1);
-    assert_eq!(agent1.agent_config_cid, "QmSecondAgentConfigCID".to_string());
+    assert_eq!(
+        agent1.agent_config_cid,
+        "QmSecondAgentConfigCID".to_string()
+    );
 }

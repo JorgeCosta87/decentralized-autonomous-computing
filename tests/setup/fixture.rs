@@ -166,7 +166,10 @@ impl TestFixture {
 
     pub fn with_create_agent(mut self) -> Self {
         let agent_owner = self.agent_owner.insecure_clone();
-        let result = self.create_agent(&agent_owner, crate::setup::test_data::DEFAULT_AGENT_CONFIG_CID.to_string());
+        let result = self.create_agent(
+            &agent_owner,
+            crate::setup::test_data::DEFAULT_AGENT_CONFIG_CID.to_string(),
+        );
         assert!(result.is_ok(), "Failed to create agent");
         self
     }

@@ -12,7 +12,7 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 
-use crate::setup::{TestFixture, Accounts};
+use crate::setup::{Accounts, TestFixture};
 use utils::Utils;
 
 pub trait Instructions {
@@ -211,7 +211,10 @@ impl Instructions for TestFixture {
             .agent(agent_pda)
             .agent_config_cid(agent_config_cid);
 
-        self.svm
-            .send_tx(&[builder.instruction()], &agent_owner_pubkey, &[agent_owner])
+        self.svm.send_tx(
+            &[builder.instruction()],
+            &agent_owner_pubkey,
+            &[agent_owner],
+        )
     }
 }
