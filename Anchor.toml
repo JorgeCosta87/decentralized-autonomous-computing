@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-dac = "C821M111okror4TN2gjdUBJK58Mbd2s94pZc8xH6S5BQ"
+dac = "GtupmyvcYoz9DXZ1qpYS4FPMtz3EHHHTzyRGWBJYevKQ"
 
 [registry]
 url = "https://api.apr.dev"

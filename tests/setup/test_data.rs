@@ -1,5 +1,5 @@
 use dac_client::dac::types::{CodeMeasurement, SemanticVersion};
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 
 // Program paths and IDs
 pub const DAC_KEYPAIR_PATH: &str = "target/deploy/dac-keypair.json";
@@ -23,3 +23,7 @@ pub fn compute_genesis_hash() -> [u8; 32] {
     hasher.update(b"DAC_GENESIS");
     hasher.finalize().into()
 }
+
+// Node test data
+pub const DEFAULT_NODE_INFO_CID: &str = "QmNodeInfoCID";
+pub const DEFAULT_CODE_MEASUREMENT: [u8; 32] = [1u8; 32];

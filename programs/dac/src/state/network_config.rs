@@ -1,3 +1,4 @@
+use crate::errors::ErrorCode;
 use crate::utils::SemanticVersion;
 use anchor_lang::prelude::*;
 use sha2::{Digest, Sha256};
@@ -53,5 +54,48 @@ impl NetworkConfig {
         let mut hasher = Sha256::new();
         hasher.update(b"DAC_GENESIS");
         Ok(hasher.finalize().into())
+    }
+
+    pub fn increment_agent_count(&mut self) -> Result<()> {
+        self.agent_count = self.agent_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
+        Ok(())
+    }
+
+    pub fn next_agent_slot_id(&self) -> u64 {
+        self.agent_count
+    }
+
+    pub fn next_goal_slot_id(&self) -> u64 {
+        self.goal_count
+    }
+
+    pub fn next_task_slot_id(&self) -> u64 {
+        self.task_count
+    }
+
+    pub fn increment_goal_count(&mut self) -> Result<()> {
+        self.goal_count = self.goal_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
+        Ok(())
+    }
+
+    pub fn increment_task_count(&mut self) -> Result<()> {
+        self.task_count = self.task_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
+        Ok(())
+    }
+
+    pub fn increment_validator_node_count(&mut self) -> Result<()> {
+        self.validator_node_count = self
+            .validator_node_count
+            .checked_add(1)
+            .ok_or(ErrorCode::Overflow)?;
+        Ok(())
+    }
+
+    pub fn increment_compute_node_count(&mut self) -> Result<()> {
+        self.compute_node_count = self
+            .compute_node_count
+            .checked_add(1)
+            .ok_or(ErrorCode::Overflow)?;
+        Ok(())
     }
 }

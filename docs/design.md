@@ -170,8 +170,11 @@ sequenceDiagram
 
 Per-node account that stores registration information, TEE attestation data, node status, and reward tracking. Each validator or compute node has its own NodeInfo account.
 
+**Node Keypair Generation**: The `node_pubkey` is generated on the server where the node software is launched. Each node instance creates its own keypair for identification and signing operations.
+
 The NodeInfo PDA stores:
-- `node_pubkey`: Public key of the node
+- `owner`: Public key of the account that registered the node (can be different from node_pubkey)
+- `node_pubkey`: Public key of the node (generated on the server where node runs)
 - `node_type`: Type of node (Validator or Compute)
 - `status`: Current status of the node
 - `node_info_cid`: IPFS CID of node metadata (for compute nodes)
@@ -180,7 +183,7 @@ The NodeInfo PDA stores:
 - `node_treasury`: Node treasury PDA address (SystemAccount for receiving payments)
 - `recent_rewards`: Vector of recent reward entries awaiting batch transfer (max 64)
 - `total_earned`: Cumulative SOL earned by the node
-- `max_entries_before_transfer`: Batch size threshold for auto-transfer (default: 10)
+- `max_entries_before_transfer`: Batch size threshold for auto-transfer (fixed at 64)
 - `last_transfer_slot`: Slot number of last auto-transfer
 - `total_tasks_completed`: Total number of tasks completed by this node
 - `bump`: NodeInfo PDA bump seed
@@ -211,24 +214,25 @@ stateDiagram-v2
 
 ```mermaid
 sequenceDiagram
-    participant User as User
-    participant CN as Compute Node
+    participant Owner as Node Owner
+    participant CN as Compute Node<br/>(Server)
     participant RPC as RPC
     participant IPFS as IPFS
     participant DAC as Smart Contract
     participant VN as Validator Node (TEE)
     
+    Note over CN: Node generates keypair on server<br/>node_pubkey = keypair.pubkey()
     CN->>RPC: Subscribe to NodeInfo account changes<br/>(status = PendingClaim)
     VN->>RPC: Subscribe to NodeInfo account changes<br/>(status = AwaitingValidation)
     
-    User->>DAC: register_node(node_pubkey, ComputeNode)
-    DAC->>DAC: Create NodeInfo<br/>status = PendingClaim
+    Owner->>DAC: register_node(node_pubkey, ComputeNode)<br/>(owner signs, node_pubkey passed as param)
+    DAC->>DAC: Create NodeInfo<br/>owner = owner.key()<br/>node_pubkey = node_pubkey<br/>status = PendingClaim<br/>Increment compute_node_count
     
     RPC->>CN: Notify NodeInfo status change<br/>(PendingClaim)
     
     CN->>IPFS: Upload node metadata
     IPFS->>CN: Return node_info_cid
-    CN->>DAC: claim_compute_node(node_info_cid)
+    CN->>DAC: claim_compute_node(node_info_cid)<br/>(compute_node signs with node_pubkey)
     DAC->>DAC: Store node_info_cid<br/>Set status = AwaitingValidation
     
     RPC->>VN: Notify NodeInfo status change<br/>(AwaitingValidation)
@@ -243,22 +247,25 @@ sequenceDiagram
     CN->>CN: Perform benchmark task
     CN->>VN: Return benchmark results
     
-    VN->>VN: Validate benchmark results<br/>message = node_pubkey + tee_signed_proof<br/>Sign with TEE signing key
-    VN->>DAC: validate_compute_node(tee_signed_proof, tee_signature)
-    DAC->>DAC: Verify TEE signature<br/>Set status = Active
+    VN->>VN: Validate benchmark results<br/>Create message: ValidateComputeNodeMessage {<br/>  compute_node_pubkey,<br/>  approved<br/>}<br/>Sign message with TEE signing key
+    VN->>DAC: Transaction with:<br/>1. Ed25519 instruction (signature verification)<br/>2. validate_compute_node()<br/>(validator_node_pubkey signs transaction)
+    DAC->>DAC: Extract signature, pubkey, message from Ed25519 instruction<br/>Verify pubkey matches stored validator TEE signing pubkey<br/>Verify message.compute_node_pubkey matches compute_node<br/>Set status = Active (if approved) or Rejected
 ```
 
 #### Sequence - Validator Node Registration
 
 ```mermaid
 sequenceDiagram
-    participant VN as Validator Node
+    participant Owner as Node Owner
+    participant VN as Validator Node<br/>(Server)
     participant TEE as TEE Enclave
     participant DAC as Smart Contract
     participant Intel as Intel SGX
     
-    VN->>DAC: register_node(node_pubkey, ValidatorNode)
-    DAC->>DAC: Create NodeInfo<br/>status = PendingClaim
+    Note over VN: Node generates keypair on server<br/>node_pubkey = keypair.pubkey()
+    
+    Owner->>DAC: register_node(node_pubkey, ValidatorNode)<br/>(owner signs, node_pubkey passed as param)
+    DAC->>DAC: Create NodeInfo<br/>owner = owner.key()<br/>node_pubkey = node_pubkey<br/>status = PendingClaim<br/>Increment validator_node_count
     
     VN->>TEE: Request SGX quote
     TEE->>TEE: Generate TEE signing keypair (Ed25519)
@@ -267,14 +274,11 @@ sequenceDiagram
     Intel->>TEE: Return QE cert + PCK cert
     TEE->>VN: Return quote + certificate_chain
     
-    VN->>DAC: claim_validator_node(quote, cert_chain, IntelSGX)
-    DAC->>DAC: Verify certificate chain<br/>(Intel Root CA → PCK → QE → Quote)
-    DAC->>DAC: Extract MRENCLAVE from quote
-    DAC->>DAC: Check MRENCLAVE in approved_code_measurements
-    DAC->>DAC: Verify report_data[0..32] == node_pubkey
-    DAC->>DAC: Extract tee_signing_pubkey from report_data[32..64]
-    DAC->>DAC: Store code_measurement and tee_signing_pubkey
-    DAC->>DAC: Set status = Active<br/>Increment validator_node_count
+    VN->>VN: Extract code_measurement (MRENCLAVE) from quote<br/>Extract tee_signing_pubkey from report_data
+    VN->>DAC: claim_validator_node(code_measurement, tee_signing_pubkey)<br/>(validator_node signs with node_pubkey)
+    DAC->>DAC: Verify code_measurement in approved_code_measurements<br/>Store code_measurement and tee_signing_pubkey<br/>Set status = Active
+    
+    Note over DAC: TODO: Full SGX quote verification<br/>(certificate chain, report_data validation)<br/>Currently simplified to code_measurement check
 ```
 
 ### Agent
@@ -759,10 +763,9 @@ Validators record rewards incrementally, and transfers occur in batches to reduc
 
 2. **Reward Accumulation**: Rewards accumulate in the list (up to 64 entries). Each time a task completes, its reward is added to this list instead of being paid immediately.
 
-3. **Automatic Transfer**: When the list reaches a certain size (default: 10 rewards), the system automatically:
+3. **Automatic Transfer**: When the list reaches the batch threshold (64 entries, which is also the maximum), the system automatically:
    - Calculates the total amount of all rewards in the list
    - Transfers that total amount from the goal vault to the compute node's treasury
-   - Updates the goal's total pending payment counter
    - Updates the node's total earnings counter
    - Clears the reward list to start fresh
 
@@ -800,164 +803,6 @@ sequenceDiagram
     Note over DAC: All contributors automatically refunded<br/>Goal status = Ready (can be reused)
 ```
 
-## Instructions Reference
-
-### Node Management Instructions
-
-(Existing instructions remain unchanged: `register_node`, `claim_compute_node`, `validate_compute_node`, `claim_validator_node`)
-
-### Task Execution Instructions
-
-#### `claim_task(compute_node, max_task_cost)`
-- **Description**: Claims a pending task for execution by a compute node, locks maximum cost
-- **Accounts**: Task (mut), Goal (mut), Vault, ComputeNode (signer)
-- **Guards**: 
-  - `task.status == Pending`
-  - `goal.status == Active`
-  - `vault.lamports() - goal.locked_for_tasks >= max_task_cost` (available balance sufficient)
-  - `max_task_cost > 0`
-  - `goal.total_shares > 0` (ensures at least one contributor exists)
-- **Actions**:
-  - Verifies available vault balance (total - locked) is sufficient for maximum task cost
-  - Locks maximum cost: `goal.locked_for_tasks += max_task_cost` (atomic with check)
-  - Sets task.max_task_cost = max_task_cost
-  - Sets task.compute_node = compute_node
-  - Sets task.status = Processing
-  - Increments task.execution_count
-  - Note: Locked funds cannot be withdrawn until task completes or fails
-  - Note: Share price automatically decreases when funds are locked (excluded from available balance)
-
-#### `submit_task_result(input_cid, output_cid)`
-- **Description**: Submits task execution results with input/output CIDs
-- **Accounts**: Task (mut), ComputeNode (signer)
-- **Guards**:
-  - `task.status == Processing`
-  - `task.compute_node == compute_node`
-- **Actions**:
-  - Stores input_cid and output_cid in `pending_input_cid` and `pending_output_cid`
-  - Sets task.status = AwaitingValidation
-  - Note: `input_cid`/`output_cid` (validated) are preserved for chain_proof calculation
-  - Note: chain_proof is NOT updated here - only after TEE validation
-
-### Payment & Contribution Instructions
-
-#### `set_goal(specification_cid, max_iterations, agent, initial_deposit)`
-- **Description**: Initializes a goal with configuration and optional initial deposit
-- **Accounts**: Goal, Vault (init), Owner Contribution (init), Owner (signer, mut)
-- **Actions**:
-  - If goal.status == Ready and goal.current_iteration > 0 (reusing goal):
-    - Resets execution state: `current_iteration = 0`, `task_index_at_goal_start = task_index_at_goal_end`, `task_index_at_goal_end = 0`
-    - Resets payment state: `total_shares = 0`, `locked_for_tasks = 0`
-    - Preserves chain_proof (continues audit trail)
-    - Can update specification_cid
-  - Creates goal vault SystemAccount PDA (if not exists)
-  - Transfers initial_deposit from owner to vault
-  - Creates owner's contribution account
-  - Calculates share_price = 1.0 (first deposit)
-  - Mints shares: `shares = initial_deposit / 1.0 = initial_deposit`
-  - Sets contribution.shares = shares
-  - Sets goal.total_shares = shares
-  - Sets goal status to Active
-
-#### `contribute_to_goal(deposit_amount)`
-- **Description**: Contributes SOL to an active goal and receives shares
-- **Accounts**: Goal (mut), Vault (mut), Contribution (init_if_needed), Contributor (signer, mut)
-- **Guards**: `goal.status == Active`, `deposit_amount > 0`
-- **Actions**:
-  - Calculates current share_price:
-    - If `goal.total_shares == 0`: share_price = 1.0 (first deposit)
-    - Else: `share_price = (vault.lamports() - goal.locked_for_tasks) / goal.total_shares`
-  - Calculates shares_to_mint: `deposit_amount / share_price`
-  - Transfers deposit_amount from contributor to vault
-  - Creates/updates contributor's contribution account
-  - Increments contribution.shares by shares_to_mint
-  - Increments goal.total_shares by shares_to_mint
-  - Note: Contributor now owns a proportional percentage of the vault
-
-#### `withdraw_from_goal(shares_to_burn)`
-- **Description**: Withdraws funds by burning shares at the current share price
-- **Accounts**: Goal (mut), Vault (mut), Contribution (mut), Contributor (signer, mut)
-- **Guards**: 
-  - `goal.status == Active`
-  - `shares_to_burn > 0`
-  - `contribution.shares >= shares_to_burn`
-- **Actions**:
-  - Calculates current share_price: `(vault.lamports() - goal.locked_for_tasks) / goal.total_shares`
-  - Calculates withdraw_amount: `shares_to_burn × share_price`
-  - Verifies available balance: `withdraw_amount <= (vault.lamports() - goal.locked_for_tasks)`
-  - Transfers withdraw_amount from vault to contributor
-  - Decrements contribution.shares by shares_to_burn
-  - Decrements goal.total_shares by shares_to_burn
-  - Note: Contributor receives their proportional share of available vault balance
-
-#### `submit_task_validation(goal_id, task_cid, payment_amount, validation_proof, tee_signature)`
-- **Description**: Submits task validation and records reward, triggering batch transfer when threshold reached
-- **Accounts**: Goal (mut), Vault (mut), NodeInfo (mut), NodeTreasury (mut), Validator (signer)
-- **Guards**: 
-  - `goal.status == Active`
-  - `goal.goal_slot_id == goal_id`
-  - `payment_amount > 0`
-  - `vault.lamports() >= total_amount` (if batch transfer triggered)
-- **Actions**:
-  - Verifies TEE signature
-  - Verifies validation_proof matches expected proof (recomputed from pending_input_cid + pending_output_cid)
-  - Verifies task hasn't been validated before (prevents replay)
-  - If validation approved:
-    - Updates task chain_proof: `SHA256(old_chain_proof + input_cid + output_cid + execution_count)` (uses previous validated values)
-    - Moves pending to validated: `input_cid = pending_input_cid`, `output_cid = pending_output_cid`
-    - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
-    - Increments task.execution_count
-    - Updates goal chain_proof: `SHA256(old_goal_proof + task_chain_proof + task_id + iteration)`
-    - Releases lock: `goal.locked_for_tasks -= task.task_cost`
-    - Adds RewardEntry to node.recent_rewards
-    - Increments node.total_tasks_completed
-    - Updates goal.current_iteration
-    - If recent_rewards.len() >= max_entries_before_transfer:
-      - Calculates total_amount = sum(recent_rewards) using checked arithmetic
-      - Transfers total_amount from vault to node_treasury (funds were locked, guaranteed available)
-      - Updates goal.total_pending_payment
-      - Updates node.total_earned
-      - Clears recent_rewards vector
-    - **If goal is complete** (determined by validator based on LLM output):
-      - Transfers any remaining rewards in recent_rewards (even if below threshold)
-      - **Automatically processes refunds for all contributors:**
-        - Uses current active contributors: `active_contributors = goal.active_contributors`
-        - Requires `active_contributors > 0` (prevents division by zero)
-        - Calculates total cost: `total_cost = sum(all completed task.task_cost)`
-        - Calculates `cost_per_contributor = total_cost / active_contributors` (using checked division)
-        - For each contributor with amount > 0:
-          - Calculates `amount_owed = min(cost_per_contributor, contribution.amount)`
-          - Calculates `refund = contribution.amount - amount_owed`
-          - Transfers refund from vault to contributor
-          - Records refund_amount = refund
-          - Sets contribution.amount = 0
-      - Sets goal.status = Ready (goal can be reused)
-  - If validation rejected:
-    - Releases lock: `goal.locked_for_tasks -= task.task_cost`
-
-
-
-    - Sets task.status = Ready (task can be retried)
-    - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
-    - Note: Validated input_cid/output_cid remain (used in chain_proof), but will be cleared when task is reused for new goal
-  - Note: Funds are locked at claim time, so payment is guaranteed if validation succeeds
-  - Note: Goal completion is detected automatically by validator, no separate instruction needed
-
-#### `cancel_goal()`
-- **Description**: Cancels goal and automatically refunds all contributors based on current share value
-- **Accounts**: Goal (mut), Vault (mut), All Contribution accounts (mut), Owner (signer)
-- **Guards**: `goal.status == Active`, `owner.key() == goal.owner`
-- **Actions**:
-  - Calculates current share_price: `vault.lamports() / goal.total_shares` (if locked_for_tasks > 0, this includes locked funds)
-  - **Automatically processes refunds for all contributors:**
-    - For each contribution with shares > 0:
-      - Calculates refund: `contribution.shares × share_price`
-      - Transfers refund from vault to contributor
-      - Records contribution.refund_amount = refund
-      - Sets contribution.shares = 0
-    - Sets goal.total_shares = 0
-  - Sets goal.status = Ready (goal can be reused)
-  - Note: If tasks are in-progress (locked_for_tasks > 0), those locked funds are included in refunds (full vault refund)
 
 
 ## Security Considerations
@@ -967,10 +812,6 @@ sequenceDiagram
 - **Code Measurement Whitelist**: Only approved MRENCLAVE values can register as validators
 - **Certificate Chain Verification**: Full chain validation from Intel Root CA to quote
 
-### Cryptographic Signatures
-- All validator operations are signed using TEE-generated Ed25519 keypairs
-- Signatures are verified on-chain before state changes
-- TEE signing public key is extracted and stored during attestation
 
 ### Data Integrity
 - **Hash Chain System**: SHA256 chain proofs provide tamper-proof execution history
@@ -1017,40 +858,18 @@ sequenceDiagram
 - **Contributor Verification**: Refund processing verifies contributor matches contribution.contributor (automatic refunds)
 - **Automatic Refunds**: Refunds processed automatically in submit_task_validation() (on goal completion) and cancel_goal(), preventing manual claiming errors
 
-#### Node Treasury Validation
-- **PDA Derivation**: Node treasury must be derived from node_info account
-- **Seeds Validation**: Seeds: ["node_treasury", node_info.key()]
-- **Prevents Payment Hijacking**: Ensures rewards only go to legitimate node treasuries
+#### Payment Security
+- **Fund Locking**: Tasks lock funds on claim (`goal.locked_for_tasks`), preventing withdrawal until validation completes
+- **Node Treasury**: PDA-derived from node_info, prevents payment hijacking
+- **Refunds**: Automatic on goal completion/cancellation, divided equally among active contributors
+- **Batch Transfers**: Rewards batched (max 64 entries), with checked arithmetic to prevent overflow
 
-#### Fund Locking Mechanism
-- **Lock on Claim**: When compute node claims task, system locks `task.max_task_cost` by incrementing `goal.locked_for_tasks`
-- **Atomic Operation**: Check and lock happen in same Solana instruction (atomic), preventing concurrent claim race conditions
-- **Withdrawal Protection**: Contributors can only withdraw available balance: `vault.lamports() - goal.locked_for_tasks`
-- **Lock Overflow Protection**: Uses checked_add to prevent lock overflow, verifies `locked_for_tasks <= vault.lamports()`
-- **Lock Release**: Lock is released when:
-  - Task is validated and payment made (lock released, payment transferred)
-  - Task is rejected (lock released, funds available again)
-- **Guaranteed Payment**: Since funds are locked at claim time, compute node is guaranteed payment if validation succeeds
-- **No Race Condition**: Contributors cannot withdraw locked funds, eliminating the race condition
+#### Cryptographic Signatures
+- **TEE-Generated Keys**: All validator operations signed using Ed25519 keypairs generated in TEE
+- **Ed25519 Instruction**: Required before `validate_compute_node`, extracts signature/pubkey/message via instructions sysvar
+- **Pubkey Verification**: Verifies signature created by validator's stored TEE signing pubkey (tamper-proof PDA storage)
+- **Message**: `ValidateComputeNodeMessage { compute_node_pubkey, approved }` - Borsh serialized (33 bytes)
 
-#### Refund Calculation Security
-- **Active Contributors on Goal**: `goal.active_contributors` is updated every time a task is claimed, reflecting the current count of active contributors
-- **Fair Cost Distribution**: Total cost of all completed tasks is divided equally among current active contributors at goal completion
-- **Withdrawal During Computing**: Contributors can withdraw during computing; refund calculation uses current active contributors at goal completion
-- **Division by Zero Protection**: Requires `goal.active_contributors > 0` before claiming task and before refund calculation (prevents task claim and goal completion if no active contributors)
-- **Checked Arithmetic**: All division uses checked_div to prevent overflow/underflow
-
-#### Batch Transfer Security
-- **Vector Overflow**: `recent_rewards` limited to max_len(64), but `max_entries_before_transfer` could be set > 64
-- **Mitigation**: Enforce `max_entries_before_transfer <= 64` in node initialization (validation guard required)
-- **Sum Overflow**: Large batch transfers could overflow u64
-- **Mitigation**: Use checked arithmetic when summing rewards
-- **Final Batch Transfer**: Remaining rewards in recent_rewards are automatically transferred when goal completes, even if below threshold (ensures compute nodes always get paid)
-
-#### TEE Signature Verification
-- **Replay Attacks**: Same signature could be reused
-- **Mitigation**: Include task_cid and goal_slot_id in signed message, verify task hasn't been validated before
-- **Signature Validation**: Must verify TEE signing pubkey matches stored pubkey from attestation
 
 #### Goal Status Transition Security
 - **Automatic Transitions**: 
