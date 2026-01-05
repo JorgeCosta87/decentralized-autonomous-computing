@@ -22,6 +22,7 @@ pub struct TestFixture {
     pub validator_node_owner: Keypair,
     pub validator_node: Keypair,
     pub tee_signing_keypair: Keypair,
+    pub agent_owner: Keypair,
 }
 
 impl TestFixture {
@@ -58,6 +59,10 @@ impl TestFixture {
 
         let tee_signing_keypair = Keypair::new();
 
+        let agent_owner = Keypair::new();
+        svm.airdrop(&agent_owner.pubkey(), 10 * LAMPORTS_PER_SOL)
+            .expect("Failed to fund agent_owner");
+
         Self {
             svm,
             program_id,
@@ -68,6 +73,7 @@ impl TestFixture {
             validator_node_owner,
             validator_node,
             tee_signing_keypair,
+            agent_owner,
         }
     }
 
@@ -147,7 +153,7 @@ impl TestFixture {
         let compute_node_pubkey = self.compute_node.pubkey();
         let tee_signing_keypair = self.tee_signing_keypair.insecure_clone();
 
-        let ed25519_ix = Helpers::create_ed25519_instruction_for_validate_compute_node(
+        let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
             &compute_node_pubkey,
             approved,
             &tee_signing_keypair,
@@ -155,6 +161,13 @@ impl TestFixture {
 
         let result = self.validate_compute_node(&validator_node, &compute_node_pubkey, &ed25519_ix);
         assert!(result.is_ok(), "Failed to validate compute node");
+        self
+    }
+
+    pub fn with_create_agent(mut self) -> Self {
+        let agent_owner = self.agent_owner.insecure_clone();
+        let result = self.create_agent(&agent_owner, crate::setup::test_data::DEFAULT_AGENT_CONFIG_CID.to_string());
+        assert!(result.is_ok(), "Failed to create agent");
         self
     }
 }

@@ -1,14 +1,8 @@
-use borsh::{BorshDeserialize, BorshSerialize};
-use dac_client::dac::accounts::NetworkConfig;
+use dac_client::dac::accounts::{Agent, NetworkConfig};
 use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey};
 
 use crate::setup::TestFixture;
 
-#[derive(BorshSerialize, BorshDeserialize)]
-pub struct ValidateComputeNodeMessage {
-    pub compute_node_pubkey: Pubkey,
-    pub approved: bool,
-}
 
 pub trait Accounts {
     fn find_network_config_pda(&self, authority: &Pubkey) -> (Pubkey, u8);
@@ -26,6 +20,8 @@ pub trait Accounts {
     fn find_node_info_pda(&self, node_pubkey: &Pubkey) -> (Pubkey, u8);
     fn find_node_treasury_pda(&self, node_info: &Pubkey) -> (Pubkey, u8);
     fn get_node_info(&self, node_pubkey: &Pubkey) -> dac_client::dac::accounts::NodeInfo;
+    fn find_agent_pda(&self, network_config: &Pubkey, agent_slot_id: u64) -> (Pubkey, u8);
+    fn get_agent(&self, network_config: &Pubkey, agent_slot_id: u64) -> Agent;
 }
 
 impl Accounts for TestFixture {
@@ -119,5 +115,22 @@ impl Accounts for TestFixture {
 
         dac_client::dac::accounts::NodeInfo::from_bytes(&account.data)
             .expect("Failed to deserialize NodeInfo account")
+    }
+
+    fn find_agent_pda(&self, network_config: &Pubkey, agent_slot_id: u64) -> (Pubkey, u8) {
+        let seeds = &[b"agent", network_config.as_ref(), &agent_slot_id.to_le_bytes()];
+        Pubkey::find_program_address(seeds, &self.program_id)
+    }
+
+    fn get_agent(&self, network_config: &Pubkey, agent_slot_id: u64) -> Agent {
+        let addr = self.find_agent_pda(network_config, agent_slot_id).0;
+
+        let account = self
+            .svm
+            .get_account(&addr)
+            .expect("Agent account not found");
+
+        Agent::from_bytes(&account.data)
+            .expect("Failed to deserialize Agent account")
     }
 }

@@ -1,6 +1,6 @@
 use dac_client::dac::instructions::{
-    ClaimComputeNodeBuilder, ClaimValidatorNodeBuilder, InitializeNetworkBuilder,
-    RegisterNodeBuilder, ValidateComputeNodeBuilder,
+    ClaimComputeNodeBuilder, ClaimValidatorNodeBuilder, CreateAgentBuilder,
+    InitializeNetworkBuilder, RegisterNodeBuilder, ValidateComputeNodeBuilder,
 };
 use dac_client::dac::types::{CodeMeasurement, NodeType};
 use litesvm::types::TransactionResult;
@@ -12,7 +12,7 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 
-use crate::setup::{Accounts, TestFixture};
+use crate::setup::{TestFixture, Accounts};
 use utils::Utils;
 
 pub trait Instructions {
@@ -51,6 +51,12 @@ pub trait Instructions {
         validator_node: &Keypair,
         compute_node_pubkey: &Pubkey,
         ed25519_ix: &Instruction,
+    ) -> TransactionResult;
+
+    fn create_agent(
+        &mut self,
+        agent_owner: &Keypair,
+        agent_config_cid: String,
     ) -> TransactionResult;
 }
 
@@ -185,5 +191,27 @@ impl Instructions for TestFixture {
             &validator_node_pubkey,
             &[validator_node],
         )
+    }
+
+    fn create_agent(
+        &mut self,
+        agent_owner: &Keypair,
+        agent_config_cid: String,
+    ) -> TransactionResult {
+        let agent_owner_pubkey = agent_owner.pubkey();
+        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config = self.get_network_config(&self.authority.pubkey());
+        let agent_slot_id = network_config.agent_count;
+        let (agent_pda, _) = self.find_agent_pda(&network_config_pda, agent_slot_id);
+
+        let mut builder = CreateAgentBuilder::new();
+        builder
+            .agent_owner(agent_owner_pubkey)
+            .network_config(network_config_pda)
+            .agent(agent_pda)
+            .agent_config_cid(agent_config_cid);
+
+        self.svm
+            .send_tx(&[builder.instruction()], &agent_owner_pubkey, &[agent_owner])
     }
 }
