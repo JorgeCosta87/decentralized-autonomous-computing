@@ -2,6 +2,8 @@ use anchor_lang::error_code;
 
 #[error_code]
 pub enum ErrorCode {
+    #[msg("Overflow")]
+    Overflow,
     #[msg("Missing account")]
     MissingAccount,
     #[msg("Need at least one code measurement")]
@@ -12,4 +14,28 @@ pub enum ErrorCode {
     InvalidPDAAccount,
     #[msg("Account already initialized")]
     AccountAlreadyInitialized,
+    #[msg("Invalid node type")]
+    InvalidNodeType,
+    #[msg("Invalid node status")]
+    InvalidNodeStatus,
+    #[msg("Invalid TEE signature")]
+    InvalidTeeSignature,
+    #[msg("Code measurement not approved")]
+    CodeMeasurementNotApproved,
+    #[msg("Node already registered")]
+    NodeAlreadyRegistered,
+    #[msg("Reward vector is full")]
+    RewardVectorFull,
+    #[msg("Invalid batch transfer threshold")]
+    InvalidBatchTransferThreshold,
+    #[msg("Invalid instruction sysvar")]
+    InvalidInstructionSysvar,
+    #[msg("Bad Ed25519 program")]
+    BadEd25519Program,
+    #[msg("Bad Ed25519 accounts")]
+    BadEd25519Accounts,
+    #[msg("Invalid validator TEE signing pubkey")]
+    InvalidValidatorTeeSigningPubkey,
+    #[msg("Invalid compute node pubkey")]
+    InvalidComputeNodePubkey,
 }
