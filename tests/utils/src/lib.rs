@@ -1,11 +1,14 @@
+use ed25519_dalek::Signer;
 use litesvm::{
     types::{TransactionMetadata, TransactionResult},
     LiteSVM,
 };
+use solana_ed25519_program::new_ed25519_instruction_with_signature;
 use solana_sdk::{
     instruction::Instruction,
+    message::Message,
     pubkey::Pubkey,
-    signature::{read_keypair_file, Keypair, Signer},
+    signature::{read_keypair_file, Keypair, Signer as SolanaSigner},
     transaction::Transaction,
 };
 
@@ -49,12 +52,9 @@ impl Utils for LiteSVM {
         signing_keypairs: &[&Keypair],
     ) -> TransactionResult {
         let blockhash = self.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(
-            instructions,
-            Some(payer),
-            signing_keypairs,
-            blockhash,
-        );
+        let message = Message::new(instructions, Some(payer));
+        let mut tx = Transaction::new_unsigned(message);
+        tx.sign(signing_keypairs, blockhash);
         let result = self.send_transaction(tx);
 
         result
@@ -65,6 +65,27 @@ impl Utils for LiteSVM {
             .unwrap_or_else(|| panic!("Account not found: {}", address))
             .lamports
     }
+}
+
+pub fn create_ed25519_instruction_with_signature(
+    message: &[u8],
+    key_pair: &Keypair,
+) -> Instruction {
+    // message is already serialized bytes, use directly
+    let message_data = message.to_vec();
+
+    let tee_keypair_bytes = key_pair.to_bytes();
+    let mut tee_secret_bytes = [0u8; 32];
+    tee_secret_bytes.copy_from_slice(&tee_keypair_bytes[..32]);
+    let tee_secret_key = ed25519_dalek::SigningKey::from_bytes(&tee_secret_bytes);
+    let signature = tee_secret_key.sign(&message_data);
+
+    let tee_pubkey = key_pair.pubkey();
+    let mut tee_pubkey_bytes = [0u8; 32];
+    tee_pubkey_bytes.copy_from_slice(tee_pubkey.as_ref());
+    let signature_bytes: [u8; 64] = signature.to_bytes();
+
+    new_ed25519_instruction_with_signature(&message_data, &signature_bytes, &tee_pubkey_bytes)
 }
 
 fn deploy_program_internal(svm: &mut LiteSVM, program_id: Pubkey, so_path: &str) -> Pubkey {

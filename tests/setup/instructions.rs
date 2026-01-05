@@ -1,16 +1,19 @@
-use dac_client::dac::instructions::InitializeNetworkBuilder;
-use dac_client::dac::types::CodeMeasurement;
+use dac_client::dac::instructions::{
+    ClaimComputeNodeBuilder, ClaimValidatorNodeBuilder, InitializeNetworkBuilder,
+    RegisterNodeBuilder, ValidateComputeNodeBuilder,
+};
+use dac_client::dac::types::{CodeMeasurement, NodeType};
 use litesvm::types::TransactionResult;
+use solana_sdk::message::Instruction;
 use solana_sdk::{
     instruction::AccountMeta,
     pubkey::Pubkey,
-    signature::{Keypair, Signer},
+    signature::{Keypair, Signer as SolanaSigner},
 };
-use utils::Utils;
+use std::str::FromStr;
 
-use crate::setup::test_data::*;
-use crate::setup::Accounts;
-use crate::setup::TestFixture;
+use crate::setup::{Accounts, TestFixture};
+use utils::Utils;
 
 pub trait Instructions {
     fn initialize_network(
@@ -23,7 +26,32 @@ pub trait Instructions {
         approved_code_measurements: Vec<CodeMeasurement>,
         remaining_accounts: &[AccountMeta],
     ) -> TransactionResult;
-    fn initialize_network_with_defaults(&mut self) -> TransactionResult;
+    fn register_node(
+        &mut self,
+        owner: &Keypair,
+        node_pubkey: &Pubkey,
+        node_type: NodeType,
+    ) -> TransactionResult;
+
+    fn claim_compute_node(
+        &mut self,
+        compute_node: &Keypair,
+        node_info_cid: String,
+    ) -> TransactionResult;
+
+    fn claim_validator_node(
+        &mut self,
+        validator_node: &Keypair,
+        code_measurement: [u8; 32],
+        tee_signing_pubkey: Pubkey,
+    ) -> TransactionResult;
+
+    fn validate_compute_node(
+        &mut self,
+        validator_node: &Keypair,
+        compute_node_pubkey: &Pubkey,
+        ed25519_ix: &Instruction,
+    ) -> TransactionResult;
 }
 
 impl Instructions for TestFixture {
@@ -55,23 +83,107 @@ impl Instructions for TestFixture {
         self.svm
             .send_tx(&[builder.instruction()], &authority_pubkey, &[authority])
     }
-    fn initialize_network_with_defaults(&mut self) -> TransactionResult {
+
+    fn register_node(
+        &mut self,
+        owner: &Keypair,
+        node_pubkey: &Pubkey,
+        node_type: NodeType,
+    ) -> TransactionResult {
+        let owner_pubkey = owner.pubkey();
         let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let (node_info_pda, _) = self.find_node_info_pda(node_pubkey);
+        let (node_treasury_pda, _) = self.find_node_treasury_pda(&node_info_pda);
 
-        let remaining_accounts = self.create_remaining_accounts_for_initialize(
-            &network_config_pda,
-            DEFAULT_ALLOCATE_GOALS,
-            DEFAULT_ALLOCATE_TASKS,
-        );
+        let mut builder = RegisterNodeBuilder::new();
+        builder
+            .owner(owner_pubkey)
+            .network_config(network_config_pda)
+            .node_info(node_info_pda)
+            .node_treasury(node_treasury_pda)
+            .system_program(
+                solana_sdk::pubkey::Pubkey::from_str("11111111111111111111111111111111").unwrap(),
+            )
+            .node_pubkey(*node_pubkey)
+            .node_type(node_type);
 
-        self.initialize_network(
-            &self.authority.insecure_clone(),
-            &network_config_pda,
-            DEFAULT_CID_CONFIG.to_string(),
-            DEFAULT_ALLOCATE_GOALS,
-            DEFAULT_ALLOCATE_TASKS,
-            DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec(),
-            &remaining_accounts,
+        self.svm
+            .send_tx(&[builder.instruction()], &owner_pubkey, &[owner])
+    }
+
+    fn claim_compute_node(
+        &mut self,
+        compute_node: &Keypair,
+        node_info_cid: String,
+    ) -> TransactionResult {
+        let compute_node_pubkey = compute_node.pubkey();
+        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let (node_info_pda, _) = self.find_node_info_pda(&compute_node_pubkey);
+
+        let mut builder = ClaimComputeNodeBuilder::new();
+        builder
+            .compute_node(compute_node_pubkey)
+            .network_config(network_config_pda)
+            .node_info(node_info_pda)
+            .node_info_cid(node_info_cid);
+
+        self.svm.send_tx(
+            &[builder.instruction()],
+            &compute_node_pubkey,
+            &[compute_node],
+        )
+    }
+
+    fn claim_validator_node(
+        &mut self,
+        validator_node: &Keypair,
+        code_measurement: [u8; 32],
+        tee_signing_pubkey: Pubkey,
+    ) -> TransactionResult {
+        let validator_node_pubkey = validator_node.pubkey();
+        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let (node_info_pda, _) = self.find_node_info_pda(&validator_node_pubkey);
+
+        let mut builder = ClaimValidatorNodeBuilder::new();
+        builder
+            .validator_node(validator_node_pubkey)
+            .network_config(network_config_pda)
+            .node_info(node_info_pda)
+            .code_measurement(code_measurement)
+            .tee_signing_pubkey(tee_signing_pubkey);
+
+        self.svm.send_tx(
+            &[builder.instruction()],
+            &validator_node_pubkey,
+            &[validator_node],
+        )
+    }
+
+    fn validate_compute_node(
+        &mut self,
+        validator_node: &Keypair,
+        compute_node_pubkey: &Pubkey,
+        ed25519_ix: &Instruction,
+    ) -> TransactionResult {
+        let validator_node_pubkey = validator_node.pubkey();
+        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let (validator_node_info_pda, _) = self.find_node_info_pda(&validator_node_pubkey);
+        let (compute_node_info_pda, _) = self.find_node_info_pda(compute_node_pubkey);
+
+        let mut builder = ValidateComputeNodeBuilder::new();
+        builder
+            .validator_node_pubkey(validator_node_pubkey)
+            .network_config(network_config_pda)
+            .validator_node_info(validator_node_info_pda)
+            .compute_node_info(compute_node_info_pda)
+            .instruction_sysvar(solana_sdk::sysvar::instructions::id());
+
+        let validate_ix = builder.instruction();
+
+        self.svm.send_tx(
+            &[ed25519_ix.clone(), validate_ix],
+            &validator_node_pubkey,
+            &[validator_node],
         )
     }
 }

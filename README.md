@@ -36,3 +36,4 @@ The program running on Solana that manages all state objects and operations.
 
 For detailed architecture, requirements, and specifications, see:
 - [Design Document](./docs/design.md) - Complete architecture and design specifications
+- [User Stories](./docs/user-stories.md) - Detailed user stories and technical implementation
