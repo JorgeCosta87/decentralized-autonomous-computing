@@ -1,10 +1,13 @@
 use crate::setup::test_data::*;
-use crate::setup::test_data::{DEFAULT_GOAL_SPECIFICATION_CID, DEFAULT_INITIAL_DEPOSIT, DEFAULT_CONTRIBUTION_AMOUNT};
+use crate::setup::test_data::{
+    DEFAULT_CONTRIBUTION_AMOUNT, DEFAULT_GOAL_SPECIFICATION_CID, DEFAULT_INITIAL_DEPOSIT,
+};
 use crate::setup::Accounts;
 use crate::setup::Helpers;
 use crate::setup::Instructions;
 use crate::setup::TestFixture;
 use dac_client::{ActionType, AgentStatus, GoalStatus, NodeStatus, NodeType, TaskStatus};
+use sha2::{Digest, Sha256};
 use solana_sdk::signature::Signer;
 use utils::Utils;
 
@@ -114,16 +117,9 @@ fn test_register_compute_node() {
 
             assert_eq!(node_info.owner, fixt.compute_node_owner.pubkey());
             assert_eq!(node_info.node_pubkey, compute_node_pubkey);
-            assert_eq!(
-                node_info.node_type,
-                NodeType::Compute
-            );
-            assert_eq!(
-                node_info.status,
-                NodeStatus::PendingClaim
-            );
+            assert_eq!(node_info.node_type, NodeType::Compute);
+            assert_eq!(node_info.status, NodeStatus::PendingClaim);
             assert_eq!(node_info.node_info_cid, None);
-            assert_eq!(node_info.max_entries_before_transfer, 64);
             assert_eq!(network_config.compute_node_count, 0);
         }
         Err(e) => panic!("Failed to register compute node: {:#?}", e),
@@ -151,14 +147,8 @@ fn test_register_validator_node() {
 
             assert_eq!(node_info.owner, fixt.validator_node_owner.pubkey());
             assert_eq!(node_info.node_pubkey, validator_node_pubkey);
-            assert_eq!(
-                node_info.node_type,
-                NodeType::Validator
-            );
-            assert_eq!(
-                node_info.status,
-                NodeStatus::PendingClaim
-            );
+            assert_eq!(node_info.node_type, NodeType::Validator);
+            assert_eq!(node_info.status, NodeStatus::PendingClaim);
             assert_eq!(node_info.code_measurement, None);
             assert_eq!(network_config.validator_node_count, 0);
         }
@@ -182,10 +172,7 @@ fn test_claim_compute_node() {
             let node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
             let network_config = fixt.get_network_config(&fixt.authority.pubkey());
 
-            assert_eq!(
-                node_info.status,
-                NodeStatus::AwaitingValidation
-            );
+            assert_eq!(node_info.status, NodeStatus::AwaitingValidation);
             assert_eq!(
                 node_info.node_info_cid,
                 Some(DEFAULT_NODE_INFO_CID.to_string())
@@ -285,10 +272,7 @@ fn test_validate_compute_node_not_approved() {
             fixt.svm.print_transaction_logs(&result.unwrap());
             let node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
 
-            assert_eq!(
-                node_info.status,
-                NodeStatus::Rejected
-            );
+            assert_eq!(node_info.status, NodeStatus::Rejected);
         }
         Err(e) => panic!("Failed to validate compute node not approved: {:#?}", e),
     }
@@ -469,7 +453,10 @@ fn test_set_goal() {
             // Verify goal was set
             assert_eq!(goal.owner, goal_owner.pubkey());
             assert_eq!(goal.agent, agent_pda);
-            assert_eq!(goal.specification_cid, DEFAULT_GOAL_SPECIFICATION_CID.to_string());
+            assert_eq!(
+                goal.specification_cid,
+                DEFAULT_GOAL_SPECIFICATION_CID.to_string()
+            );
             assert_eq!(goal.max_iterations, 10);
             assert_eq!(goal.status, GoalStatus::Active);
             assert_eq!(goal.total_shares, DEFAULT_INITIAL_DEPOSIT);
@@ -504,11 +491,7 @@ fn test_contribute_to_goal() {
 
     let mut fixt = fixt.with_set_goal(0, 0);
 
-    let result = fixt.contribute_to_goal(
-        &contributor,
-        0,
-        DEFAULT_CONTRIBUTION_AMOUNT,
-    );
+    let result = fixt.contribute_to_goal(&contributor, 0, DEFAULT_CONTRIBUTION_AMOUNT);
 
     match result {
         Ok(_) => {
@@ -522,7 +505,10 @@ fn test_contribute_to_goal() {
             assert!(contribution.shares > 0, "Contributor should have shares");
             assert_eq!(contribution.refund_amount, 0);
 
-            assert!(goal.total_shares > DEFAULT_INITIAL_DEPOSIT, "Total shares should include contributor's shares");
+            assert!(
+                goal.total_shares > DEFAULT_INITIAL_DEPOSIT,
+                "Total shares should include contributor's shares"
+            );
         }
         Err(e) => panic!("Failed to contribute to goal: {:#?}", e),
     }
@@ -534,7 +520,7 @@ fn test_contribute_to_goal_multiple_contributors() {
         .with_initialize_network()
         .with_create_agent()
         .with_validated_agent(0);
-        
+
     let authority = fixt.authority.insecure_clone();
     let goal_owner = fixt.create_keypair();
     let contributor1 = fixt.create_keypair();
@@ -553,19 +539,11 @@ fn test_contribute_to_goal_multiple_contributors() {
     assert!(result.is_ok(), "Failed to set goal: {:#?}", result.err());
 
     // First contribution
-    let result1 = fixt.contribute_to_goal(
-        &contributor1,
-        0,
-        DEFAULT_CONTRIBUTION_AMOUNT,
-    );
+    let result1 = fixt.contribute_to_goal(&contributor1, 0, DEFAULT_CONTRIBUTION_AMOUNT);
     assert!(result1.is_ok(), "Failed first contribution");
 
     // Second contribution
-    let result2 = fixt.contribute_to_goal(
-        &contributor2,
-        0,
-        DEFAULT_CONTRIBUTION_AMOUNT,
-    );
+    let result2 = fixt.contribute_to_goal(&contributor2, 0, DEFAULT_CONTRIBUTION_AMOUNT);
     assert!(result2.is_ok(), "Failed second contribution");
 
     let goal = fixt.get_goal(&network_config_pda, 0);
@@ -582,10 +560,15 @@ fn test_contribute_to_goal_multiple_contributors() {
     println!("Initial deposit: {}", DEFAULT_INITIAL_DEPOSIT);
     println!("Contribution amount: {}", DEFAULT_CONTRIBUTION_AMOUNT);
     println!("Total contributions: {}", DEFAULT_CONTRIBUTION_AMOUNT * 2);
-    println!("Total shares should be sum of all contributions: {}", DEFAULT_INITIAL_DEPOSIT + DEFAULT_CONTRIBUTION_AMOUNT * 2);
+    println!(
+        "Total shares should be sum of all contributions: {}",
+        DEFAULT_INITIAL_DEPOSIT + DEFAULT_CONTRIBUTION_AMOUNT * 2
+    );
 
-    assert!(goal.total_shares >= DEFAULT_INITIAL_DEPOSIT + DEFAULT_CONTRIBUTION_AMOUNT * 2, 
-            "Total shares should include all contributions");
+    assert!(
+        goal.total_shares >= DEFAULT_INITIAL_DEPOSIT + DEFAULT_CONTRIBUTION_AMOUNT * 2,
+        "Total shares should include all contributions"
+    );
 }
 
 #[test]
@@ -596,11 +579,10 @@ fn test_withdraw_from_goal() {
         .with_validated_agent(0)
         .with_set_goal(0, 0)
         .with_contribute_to_goal(0, DEFAULT_CONTRIBUTION_AMOUNT);
-    
+
     let authority = fixt.authority.insecure_clone();
     let contributor = fixt.contributor.insecure_clone();
     let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
-
 
     let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
     let contribution_before = fixt.get_contribution(&goal_pda, &contributor.pubkey());
@@ -631,5 +613,194 @@ fn test_withdraw_from_goal() {
             assert_eq!(contribution_after.contributor, contributor.pubkey());
         }
         Err(e) => panic!("Failed to withdraw from goal: {:#?}", e),
+    }
+}
+
+#[test]
+fn test_claim_task() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_validator_node()
+        .with_claim_validator_node()
+        .with_register_compute_node()
+        .with_claim_compute_node()
+        .with_validate_compute_node(true)
+        .with_create_agent()
+        .with_validated_agent(0)
+        .with_create_goal()
+        .with_set_goal(0, 0);
+
+    let goal_slot_id = 0;
+    let task_slot_id = 0;
+    let max_task_cost = 1_000_000_000; // 1 SOL
+
+    let result = fixt.claim_task(
+        &fixt.compute_node.insecure_clone(),
+        goal_slot_id,
+        task_slot_id,
+        max_task_cost,
+    );
+
+    match result {
+        Ok(_) => {
+            fixt.svm.print_transaction_logs(&result.unwrap());
+            let network_config_pda = fixt.find_network_config_pda(&fixt.authority.pubkey()).0;
+            let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+            let task = fixt.get_task(&network_config_pda, task_slot_id);
+
+            assert_eq!(task.status, TaskStatus::Processing);
+            assert_eq!(task.compute_node, Some(fixt.compute_node.pubkey()));
+            assert_eq!(task.max_task_cost, max_task_cost);
+            assert_eq!(task.execution_count, 1);
+            assert_eq!(goal.locked_for_tasks, max_task_cost);
+        }
+        Err(e) => panic!("Failed to claim task: {:#?}", e),
+    }
+}
+
+#[test]
+fn test_submit_task_result() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_validator_node()
+        .with_claim_validator_node()
+        .with_register_compute_node()
+        .with_claim_compute_node()
+        .with_validate_compute_node(true)
+        .with_create_agent()
+        .with_validated_agent(0)
+        .with_create_goal()
+        .with_set_goal(0, 0);
+
+    let goal_slot_id = 0;
+    let task_slot_id = 0;
+    let max_task_cost = 1_000_000_000;
+
+    let result = fixt.claim_task(
+        &fixt.compute_node.insecure_clone(),
+        goal_slot_id,
+        task_slot_id,
+        max_task_cost,
+    );
+    assert!(result.is_ok(), "Failed to claim task");
+
+    let input_cid = "QmTestInput123456789".to_string();
+    let output_cid = "QmTestOutput123456789".to_string();
+
+    let result = fixt.submit_task_result(
+        &fixt.compute_node.insecure_clone(),
+        task_slot_id,
+        input_cid.clone(),
+        output_cid.clone(),
+    );
+
+    match result {
+        Ok(_) => {
+            fixt.svm.print_transaction_logs(&result.unwrap());
+            let network_config_pda = fixt.find_network_config_pda(&fixt.authority.pubkey()).0;
+            let task = fixt.get_task(&network_config_pda, task_slot_id);
+
+            assert_eq!(task.status, TaskStatus::AwaitingValidation);
+            assert_eq!(task.pending_input_cid, Some(input_cid));
+            assert_eq!(task.pending_output_cid, Some(output_cid));
+        }
+        Err(e) => panic!("Failed to submit task result: {:#?}", e),
+    }
+}
+
+#[test]
+fn test_submit_task_validation_approved() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_validator_node()
+        .with_claim_validator_node()
+        .with_register_compute_node()
+        .with_claim_compute_node()
+        .with_validate_compute_node(true)
+        .with_create_agent()
+        .with_validated_agent(0)
+        .with_create_goal()
+        .with_set_goal(0, 0);
+
+    let goal_slot_id = 0;
+    let task_slot_id = 0;
+    let max_task_cost = 1_000_000_000;
+    let payment_amount = 500_000_000;
+
+    let result = fixt.claim_task(
+        &fixt.compute_node.insecure_clone(),
+        goal_slot_id,
+        task_slot_id,
+        max_task_cost,
+    );
+    assert!(result.is_ok(), "Failed to claim task");
+
+    // Submit task result
+    let input_cid = "QmTestInput123456789".to_string();
+    let output_cid = "QmTestOutput123456789".to_string();
+    let result = fixt.submit_task_result(
+        &fixt.compute_node.insecure_clone(),
+        task_slot_id,
+        input_cid.clone(),
+        output_cid.clone(),
+    );
+    assert!(result.is_ok(), "Failed to submit task result");
+
+    // Compute validation proof
+    let mut hasher = Sha256::new();
+    hasher.update(input_cid.as_bytes());
+    hasher.update(output_cid.as_bytes());
+    let validation_proof: [u8; 32] = hasher.finalize().into();
+
+    // Create Ed25519 instruction
+    let ed25519_ix = Helpers::create_ed25519_instruction_to_submit_task_validation(
+        goal_slot_id,
+        task_slot_id,
+        payment_amount,
+        validation_proof,
+        true,
+        false,
+        &fixt.tee_signing_keypair.insecure_clone(),
+    );
+
+    // Submit validation
+    let result = fixt.submit_task_validation(
+        &fixt.validator_node.insecure_clone(),
+        goal_slot_id,
+        task_slot_id,
+        &fixt.compute_node.pubkey(),
+        &ed25519_ix,
+    );
+
+    match result {
+        Ok(_) => {
+            fixt.svm.print_transaction_logs(&result.unwrap());
+            let network_config_pda = fixt.find_network_config_pda(&fixt.authority.pubkey()).0;
+            let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+            let task = fixt.get_task(&network_config_pda, task_slot_id);
+            let compute_node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
+            let (compute_node_info_pda, _) = fixt.find_node_info_pda(&fixt.compute_node.pubkey());
+
+            assert_eq!(task.status, TaskStatus::Pending);
+            assert_eq!(task.input_cid, Some(input_cid));
+            assert_eq!(task.output_cid, Some(output_cid));
+            assert_eq!(task.pending_input_cid, None);
+            assert_eq!(task.pending_output_cid, None);
+            assert_eq!(goal.locked_for_tasks, 0);
+            assert_eq!(goal.current_iteration, 1);
+            assert_eq!(compute_node_info.total_tasks_completed, 1);
+            assert_eq!(compute_node_info.total_earned, payment_amount);
+
+            let (node_treasury_pda, _) = fixt.find_node_treasury_pda(&compute_node_info_pda);
+            let node_treasury_lamports = fixt.svm.get_lamports(&node_treasury_pda);
+
+            assert!(
+                node_treasury_lamports >= payment_amount,
+                "Node treasury should have at least payment_amount. Got: {}, Expected: {}",
+                node_treasury_lamports,
+                payment_amount
+            );
+        }
+        Err(e) => panic!("Failed to submit task validation: {:#?}", e),
     }
 }

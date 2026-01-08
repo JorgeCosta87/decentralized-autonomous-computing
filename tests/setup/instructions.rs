@@ -1,8 +1,8 @@
 use dac_client::instructions::{
-    ClaimComputeNodeBuilder, ClaimValidatorNodeBuilder, CreateAgentBuilder,
-    CreateGoalBuilder, ContributeToGoalBuilder, SetGoalBuilder, WithdrawFromGoalBuilder,
-    InitializeNetworkBuilder, RegisterNodeBuilder, ValidateComputeNodeBuilder,
-    ValidateAgentBuilder,
+    ClaimComputeNodeBuilder, ClaimTaskBuilder, ClaimValidatorNodeBuilder, ContributeToGoalBuilder,
+    CreateAgentBuilder, CreateGoalBuilder, InitializeNetworkBuilder, RegisterNodeBuilder,
+    SetGoalBuilder, SubmitTaskResultBuilder, SubmitTaskValidationBuilder, ValidateAgentBuilder,
+    ValidateComputeNodeBuilder, WithdrawFromGoalBuilder,
 };
 use dac_client::types::{CodeMeasurement, NodeType};
 use litesvm::types::TransactionResult;
@@ -14,7 +14,7 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 
-use crate::setup::{TestFixture, Accounts};
+use crate::setup::{Accounts, TestFixture};
 use utils::Utils;
 
 pub trait Instructions {
@@ -55,11 +55,7 @@ pub trait Instructions {
         ed25519_ix: &Instruction,
     ) -> TransactionResult;
 
-    fn validate_agent(
-        &mut self,
-        validator: &Keypair,
-        agent_slot_id: u64,
-    ) -> TransactionResult;
+    fn validate_agent(&mut self, validator: &Keypair, agent_slot_id: u64) -> TransactionResult;
 
     fn create_agent(
         &mut self,
@@ -67,11 +63,7 @@ pub trait Instructions {
         agent_config_cid: String,
     ) -> TransactionResult;
 
-    fn create_goal(
-        &mut self,
-        payer: &Keypair,
-        is_public: bool,
-    ) -> TransactionResult;
+    fn create_goal(&mut self, payer: &Keypair, is_public: bool) -> TransactionResult;
 
     fn set_goal(
         &mut self,
@@ -96,6 +88,31 @@ pub trait Instructions {
         contributor: &Keypair,
         goal_slot_id: u64,
         shares_to_burn: u64,
+    ) -> TransactionResult;
+
+    fn claim_task(
+        &mut self,
+        compute_node: &Keypair,
+        goal_slot_id: u64,
+        task_slot_id: u64,
+        max_task_cost: u64,
+    ) -> TransactionResult;
+
+    fn submit_task_result(
+        &mut self,
+        compute_node: &Keypair,
+        task_slot_id: u64,
+        input_cid: String,
+        output_cid: String,
+    ) -> TransactionResult;
+
+    fn submit_task_validation(
+        &mut self,
+        validator: &Keypair,
+        goal_slot_id: u64,
+        task_slot_id: u64,
+        compute_node_pubkey: &Pubkey,
+        ed25519_ix: &Instruction,
     ) -> TransactionResult;
 }
 
@@ -232,11 +249,7 @@ impl Instructions for TestFixture {
         )
     }
 
-    fn validate_agent(
-        &mut self,
-        validator: &Keypair,
-        agent_slot_id: u64,
-    ) -> TransactionResult {
+    fn validate_agent(&mut self, validator: &Keypair, agent_slot_id: u64) -> TransactionResult {
         let validator_pubkey = validator.pubkey();
         let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
         let (agent_pda, _) = self.find_agent_pda(&network_config_pda, agent_slot_id);
@@ -269,15 +282,14 @@ impl Instructions for TestFixture {
             .agent(agent_pda)
             .agent_config_cid(agent_config_cid);
 
-        self.svm
-            .send_tx(&[builder.instruction()], &agent_owner_pubkey, &[agent_owner])
+        self.svm.send_tx(
+            &[builder.instruction()],
+            &agent_owner_pubkey,
+            &[agent_owner],
+        )
     }
 
-    fn create_goal(
-        &mut self,
-        owner: &Keypair,
-        is_public: bool,
-    ) -> TransactionResult {
+    fn create_goal(&mut self, owner: &Keypair, is_public: bool) -> TransactionResult {
         let owner_pubkey = owner.pubkey();
         let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
         let network_config = self.get_network_config(&self.authority.pubkey());
@@ -287,7 +299,7 @@ impl Instructions for TestFixture {
         let mut builder = CreateGoalBuilder::new();
         builder
             .payer(owner_pubkey)
-            .owner(owner_pubkey) 
+            .owner(owner_pubkey)
             .network_config(network_config_pda)
             .goal(goal_pda)
             .is_public(is_public);
@@ -352,8 +364,11 @@ impl Instructions for TestFixture {
             .network_config(network_config_pda)
             .deposit_amount(deposit_amount);
 
-        self.svm
-            .send_tx(&[builder.instruction()], &contributor_pubkey, &[contributor])
+        self.svm.send_tx(
+            &[builder.instruction()],
+            &contributor_pubkey,
+            &[contributor],
+        )
     }
 
     fn withdraw_from_goal(
@@ -377,7 +392,105 @@ impl Instructions for TestFixture {
             .network_config(network_config_pda)
             .shares_to_burn(shares_to_burn);
 
-        self.svm
-            .send_tx(&[builder.instruction()], &contributor_pubkey, &[contributor])
+        self.svm.send_tx(
+            &[builder.instruction()],
+            &contributor_pubkey,
+            &[contributor],
+        )
+    }
+
+    fn claim_task(
+        &mut self,
+        compute_node: &Keypair,
+        goal_slot_id: u64,
+        task_slot_id: u64,
+        max_task_cost: u64,
+    ) -> TransactionResult {
+        let compute_node_pubkey = compute_node.pubkey();
+        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+        let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
+        let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
+        let (compute_node_info_pda, _) = self.find_node_info_pda(&compute_node_pubkey);
+
+        let mut builder = ClaimTaskBuilder::new();
+        builder
+            .compute_node(compute_node_pubkey)
+            .task(task_pda)
+            .goal(goal_pda)
+            .vault(vault_pda)
+            .compute_node_info(compute_node_info_pda)
+            .network_config(network_config_pda)
+            .max_task_cost(max_task_cost);
+
+        self.svm.send_tx(
+            &[builder.instruction()],
+            &compute_node_pubkey,
+            &[compute_node],
+        )
+    }
+
+    fn submit_task_result(
+        &mut self,
+        compute_node: &Keypair,
+        task_slot_id: u64,
+        input_cid: String,
+        output_cid: String,
+    ) -> TransactionResult {
+        let compute_node_pubkey = compute_node.pubkey();
+        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
+
+        let mut builder = SubmitTaskResultBuilder::new();
+        builder
+            .compute_node(compute_node_pubkey)
+            .task(task_pda)
+            .network_config(network_config_pda)
+            .input_cid(input_cid)
+            .output_cid(output_cid);
+
+        self.svm.send_tx(
+            &[builder.instruction()],
+            &compute_node_pubkey,
+            &[compute_node],
+        )
+    }
+
+    fn submit_task_validation(
+        &mut self,
+        validator: &Keypair,
+        goal_slot_id: u64,
+        task_slot_id: u64,
+        compute_node_pubkey: &Pubkey,
+        ed25519_ix: &Instruction,
+    ) -> TransactionResult {
+        let validator_pubkey = validator.pubkey();
+        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+        let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
+        let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
+        let (compute_node_info_pda, _) = self.find_node_info_pda(compute_node_pubkey);
+        let (node_treasury_pda, _) = self.find_node_treasury_pda(&compute_node_info_pda);
+        let (validator_node_info_pda, _) = self.find_node_info_pda(&validator_pubkey);
+
+        let mut builder = SubmitTaskValidationBuilder::new();
+        builder
+            .validator(validator_pubkey)
+            .goal(goal_pda)
+            .vault(vault_pda)
+            .task(task_pda)
+            .compute_node_info(compute_node_info_pda)
+            .node_treasury(node_treasury_pda)
+            .validator_node_info(validator_node_info_pda)
+            .network_config(network_config_pda)
+            .instruction_sysvar(solana_sdk::sysvar::instructions::id());
+
+        let validate_ix = builder.instruction();
+
+        self.svm.send_tx(
+            &[ed25519_ix.clone(), validate_ix],
+            &validator_pubkey,
+            &[validator],
+        )
     }
 }

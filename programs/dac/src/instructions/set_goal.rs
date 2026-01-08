@@ -1,10 +1,10 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
-use crate::ActionType;
-use crate::NetworkConfig;
 use crate::errors::ErrorCode;
 use crate::state::{Agent, AgentStatus, Contribution, Goal, GoalStatus, Task, TaskStatus};
+use crate::ActionType;
+use crate::NetworkConfig;
 
 #[derive(Accounts)]
 pub struct SetGoal<'info> {
@@ -68,8 +68,9 @@ impl<'info> SetGoal<'info> {
             self.goal.status == GoalStatus::Ready,
             ErrorCode::InvalidGoalStatus
         );
-        require!(self.goal.owner == Pubkey::default() ||
-            self.goal.owner == self.owner.key(), ErrorCode::InvalidGoalOwner
+        require!(
+            self.goal.owner == Pubkey::default() || self.goal.owner == self.owner.key(),
+            ErrorCode::InvalidGoalOwner
         );
         require!(
             self.task.status == TaskStatus::Ready,
@@ -100,17 +101,15 @@ impl<'info> SetGoal<'info> {
         }
 
         let goal_key = self.goal.key();
-        let vault_seeds = &[
-            b"goal_vault",
-            goal_key.as_ref(),
-            &[bumps.vault],
-        ];
+        let vault_seeds = &[b"goal_vault", goal_key.as_ref(), &[bumps.vault]];
         let vault_signer = &[&vault_seeds[..]];
 
         if vault_balance == 0 {
             // Vault doesn't exist
             let required_lamports = rent_exempt_minimum;
-            let transfer_amount = initial_deposit.checked_add(required_lamports).ok_or(ErrorCode::Overflow)?;
+            let transfer_amount = initial_deposit
+                .checked_add(required_lamports)
+                .ok_or(ErrorCode::Overflow)?;
 
             let cpi_accounts = system_program::CreateAccount {
                 from: self.owner.to_account_info(),
@@ -122,22 +121,14 @@ impl<'info> SetGoal<'info> {
                 vault_signer,
             );
 
-            system_program::create_account(
-                cpi_context,
-                transfer_amount,
-                0,
-                &system_program::ID,
-            )?;
+            system_program::create_account(cpi_context, transfer_amount, 0, &system_program::ID)?;
         } else {
             // Vault exists with only rent
             let cpi_accounts = system_program::Transfer {
                 from: self.owner.to_account_info(),
                 to: self.vault.to_account_info(),
             };
-            let cpi_context = CpiContext::new(
-                self.system_program.to_account_info(),
-                cpi_accounts,
-            );
+            let cpi_context = CpiContext::new(self.system_program.to_account_info(), cpi_accounts);
             system_program::transfer(cpi_context, initial_deposit)?;
         }
 

@@ -1,7 +1,9 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::ErrorCode;
-use crate::state::{Goal, GoalStatus, NetworkConfig, NodeInfo, NodeStatus, NodeType, Task, TaskStatus};
+use crate::state::{
+    Goal, GoalStatus, NetworkConfig, NodeInfo, NodeStatus, NodeType, Task, TaskStatus,
+};
 
 #[derive(Accounts)]
 pub struct ClaimTask<'info> {
@@ -61,10 +63,7 @@ impl<'info> ClaimTask<'info> {
             ErrorCode::InvalidNodeType
         );
         require!(max_task_cost > 0, ErrorCode::Overflow);
-        require!(
-            self.goal.total_shares > 0,
-            ErrorCode::Overflow
-        );
+        require!(self.goal.total_shares > 0, ErrorCode::Overflow);
 
         // Check available balance (vault - locked - rent)
         let rent = Rent::get()?;

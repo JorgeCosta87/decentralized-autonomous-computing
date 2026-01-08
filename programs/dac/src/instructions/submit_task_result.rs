@@ -23,11 +23,7 @@ pub struct SubmitTaskResult<'info> {
 }
 
 impl<'info> SubmitTaskResult<'info> {
-    pub fn submit_task_result(
-        &mut self,
-        input_cid: String,
-        output_cid: String,
-    ) -> Result<()> {
+    pub fn submit_task_result(&mut self, input_cid: String, output_cid: String) -> Result<()> {
         require!(
             self.task.status == TaskStatus::Processing,
             ErrorCode::InvalidTaskStatus

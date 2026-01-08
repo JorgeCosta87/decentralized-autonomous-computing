@@ -74,9 +74,9 @@ pub struct SubmitTaskValidation<'info> {
     )]
     pub network_config: Account<'info, NetworkConfig>,
 
-        /// CHECK: Check if the instruction is from the Ed25519 program
-        #[account(address = ix_sysvar::Instructions::id())]
-        pub instruction_sysvar: AccountInfo<'info>,
+    /// CHECK: Check if the instruction is from the Ed25519 program
+    #[account(address = ix_sysvar::Instructions::id())]
+    pub instruction_sysvar: AccountInfo<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -233,11 +233,7 @@ impl<'info> SubmitTaskValidation<'info> {
             );
 
             let goal_key = self.goal.key();
-            let vault_seeds = &[
-                b"goal_vault",
-                goal_key.as_ref(),
-                &[self.goal.vault_bump],
-            ];
+            let vault_seeds = &[b"goal_vault", goal_key.as_ref(), &[self.goal.vault_bump]];
             let vault_signer = &[&vault_seeds[..]];
 
             let cpi_accounts = system_program::Transfer {

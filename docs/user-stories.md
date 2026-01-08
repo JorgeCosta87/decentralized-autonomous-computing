@@ -181,7 +181,7 @@ This document contains user stories and technical implementation details for all
   - `goal.status == Active`
   - `goal.goal_slot_id == goal_id`
   - `payment_amount > 0`
-  - `vault.lamports() >= total_amount` (if batch transfer triggered)
+  - `vault.lamports() >= payment_amount`
 - **Actions**:
   - Verifies TEE signature
   - Verifies validation_proof matches expected proof (recomputed from pending_input_cid + pending_output_cid)
@@ -192,36 +192,20 @@ This document contains user stories and technical implementation details for all
     - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
     - Increments task.execution_count
     - Updates goal chain_proof: `SHA256(old_goal_proof + task_chain_proof + task_id + iteration)`
-    - Releases lock: `goal.locked_for_tasks -= task.task_cost`
-    - Adds RewardEntry to node.recent_rewards
+    - Releases lock: `goal.locked_for_tasks -= task.max_task_cost`
+    - Transfers payment_amount from vault to node_treasury immediately
+    - Updates node.total_earned += payment_amount
     - Increments node.total_tasks_completed
     - Updates goal.current_iteration
-    - If recent_rewards.len() >= max_entries_before_transfer:
-      - Calculates total_amount = sum(recent_rewards) using checked arithmetic
-      - Transfers total_amount from vault to node_treasury (funds were locked, guaranteed available)
-      - Updates goal.total_pending_payment
-      - Updates node.total_earned
-      - Clears recent_rewards vector
     - **If goal is complete** (determined by validator based on LLM output):
-      - Transfers any remaining rewards in recent_rewards (even if below threshold)
-      - **Automatically processes refunds for all contributors:**
-        - Uses current active contributors: `active_contributors = goal.active_contributors`
-        - Requires `active_contributors > 0` (prevents division by zero)
-        - Calculates total cost: `total_cost = sum(all completed task.task_cost)`
-        - Calculates `cost_per_contributor = total_cost / active_contributors` (using checked division)
-        - For each contributor with amount > 0:
-          - Calculates `amount_owed = min(cost_per_contributor, contribution.amount)`
-          - Calculates `refund = contribution.amount - amount_owed`
-          - Transfers refund from vault to contributor
-          - Records refund_amount = refund
-          - Sets contribution.amount = 0
       - Sets goal.status = Ready (goal can be reused)
   - If validation rejected:
-    - Releases lock: `goal.locked_for_tasks -= task.task_cost`
+    - Releases lock: `goal.locked_for_tasks -= task.max_task_cost`
     - Sets task.status = Ready (task can be retried)
     - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
     - Note: Validated input_cid/output_cid remain (used in chain_proof), but will be cleared when task is reused for new goal
   - Note: Funds are locked at claim time, so payment is guaranteed if validation succeeds
+  - Note: Payment is transferred immediately on each validation
   - Note: Goal completion is detected automatically by validator, no separate instruction needed
 
 ## Payment & Contribution

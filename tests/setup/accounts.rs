@@ -3,7 +3,6 @@ use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey};
 
 use crate::setup::TestFixture;
 
-
 pub trait Accounts {
     fn find_network_config_pda(&self, authority: &Pubkey) -> (Pubkey, u8);
     fn get_network_config(&self, authority: &Pubkey) -> NetworkConfig;
@@ -118,12 +117,15 @@ impl Accounts for TestFixture {
             .get_account(&addr)
             .expect("NodeInfo account not found");
 
-        NodeInfo::from_bytes(&account.data)
-            .expect("Failed to deserialize NodeInfo account")
+        NodeInfo::from_bytes(&account.data).expect("Failed to deserialize NodeInfo account")
     }
 
     fn find_agent_pda(&self, network_config: &Pubkey, agent_slot_id: u64) -> (Pubkey, u8) {
-        let seeds = &[b"agent", network_config.as_ref(), &agent_slot_id.to_le_bytes()];
+        let seeds = &[
+            b"agent",
+            network_config.as_ref(),
+            &agent_slot_id.to_le_bytes(),
+        ];
         Pubkey::find_program_address(seeds, &self.program_id)
     }
 
@@ -135,8 +137,7 @@ impl Accounts for TestFixture {
             .get_account(&addr)
             .expect("Agent account not found");
 
-        Agent::from_bytes(&account.data)
-            .expect("Failed to deserialize Agent account")
+        Agent::from_bytes(&account.data).expect("Failed to deserialize Agent account")
     }
 
     fn find_goal_vault_pda(&self, goal: &Pubkey) -> (Pubkey, u8) {
@@ -147,13 +148,9 @@ impl Accounts for TestFixture {
     fn get_goal(&self, network_config: &Pubkey, goal_slot_id: u64) -> Goal {
         let addr = self.find_goal_pda(network_config, goal_slot_id).0;
 
-        let account = self
-            .svm
-            .get_account(&addr)
-            .expect("Goal account not found");
+        let account = self.svm.get_account(&addr).expect("Goal account not found");
 
-        Goal::from_bytes(&account.data)
-            .expect("Failed to deserialize Goal account")
+        Goal::from_bytes(&account.data).expect("Failed to deserialize Goal account")
     }
 
     fn find_contribution_pda(&self, goal: &Pubkey, contributor: &Pubkey) -> (Pubkey, u8) {
@@ -169,19 +166,14 @@ impl Accounts for TestFixture {
             .get_account(&addr)
             .expect("Contribution account not found");
 
-        Contribution::from_bytes(&account.data)
-            .expect("Failed to deserialize Contribution account")
+        Contribution::from_bytes(&account.data).expect("Failed to deserialize Contribution account")
     }
 
     fn get_task(&self, network_config: &Pubkey, task_slot_id: u64) -> Task {
         let addr = self.find_task_pda(network_config, task_slot_id).0;
 
-        let account = self
-            .svm
-            .get_account(&addr)
-            .expect("Task account not found");
+        let account = self.svm.get_account(&addr).expect("Task account not found");
 
-        Task::from_bytes(&account.data)
-            .expect("Failed to deserialize Task account")
+        Task::from_bytes(&account.data).expect("Failed to deserialize Task account")
     }
 }

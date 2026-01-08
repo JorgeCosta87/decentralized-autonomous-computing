@@ -75,21 +75,19 @@ pub mod dac {
         max_iterations: u64,
         initial_deposit: u64,
     ) -> Result<()> {
-        ctx.accounts
-            .set_goal(specification_cid, max_iterations, initial_deposit, &ctx.bumps)
+        ctx.accounts.set_goal(
+            specification_cid,
+            max_iterations,
+            initial_deposit,
+            &ctx.bumps,
+        )
     }
 
-    pub fn contribute_to_goal(
-        ctx: Context<ContributeToGoal>,
-        deposit_amount: u64,
-    ) -> Result<()> {
+    pub fn contribute_to_goal(ctx: Context<ContributeToGoal>, deposit_amount: u64) -> Result<()> {
         ctx.accounts.contribute_to_goal(deposit_amount, &ctx.bumps)
     }
 
-    pub fn withdraw_from_goal(
-        ctx: Context<WithdrawFromGoal>,
-        shares_to_burn: u64,
-    ) -> Result<()> {
+    pub fn withdraw_from_goal(ctx: Context<WithdrawFromGoal>, shares_to_burn: u64) -> Result<()> {
         ctx.accounts.withdraw_from_goal(shares_to_burn)
     }
 
