@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("GtupmyvcYoz9DXZ1qpYS4FPMtz3EHHHTzyRGWBJYevKQ");
+declare_id!("BaY9vp3RXAQugzAoBojkBEZs9fJKS4dNManN7vwDZSFh");
 
 pub mod errors;
 pub mod instructions;
@@ -91,5 +91,21 @@ pub mod dac {
         shares_to_burn: u64,
     ) -> Result<()> {
         ctx.accounts.withdraw_from_goal(shares_to_burn)
+    }
+
+    pub fn claim_task(ctx: Context<ClaimTask>, max_task_cost: u64) -> Result<()> {
+        ctx.accounts.claim_task(max_task_cost)
+    }
+
+    pub fn submit_task_result(
+        ctx: Context<SubmitTaskResult>,
+        input_cid: String,
+        output_cid: String,
+    ) -> Result<()> {
+        ctx.accounts.submit_task_result(input_cid, output_cid)
+    }
+
+    pub fn submit_task_validation(ctx: Context<SubmitTaskValidation>) -> Result<()> {
+        ctx.accounts.submit_task_validation()
     }
 }

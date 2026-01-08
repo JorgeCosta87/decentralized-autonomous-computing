@@ -9,6 +9,9 @@ pub mod create_goal;
 pub mod set_goal;
 pub mod contribute_to_goal;
 pub mod withdraw_from_goal;
+pub mod claim_task;
+pub mod submit_task_result;
+pub mod submit_task_validation;
 
 pub use initialize_network::*;
 pub use register_node::*;
@@ -21,3 +24,6 @@ pub use create_goal::*;
 pub use set_goal::*;
 pub use contribute_to_goal::*;
 pub use withdraw_from_goal::*;
+pub use claim_task::*;
+pub use submit_task_result::*;
+pub use submit_task_validation::*;

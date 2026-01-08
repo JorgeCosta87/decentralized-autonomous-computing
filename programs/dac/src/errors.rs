@@ -24,10 +24,6 @@ pub enum ErrorCode {
     CodeMeasurementNotApproved,
     #[msg("Node already registered")]
     NodeAlreadyRegistered,
-    #[msg("Reward vector is full")]
-    RewardVectorFull,
-    #[msg("Invalid batch transfer threshold")]
-    InvalidBatchTransferThreshold,
     #[msg("Invalid instruction sysvar")]
     InvalidInstructionSysvar,
     #[msg("Bad Ed25519 program")]
@@ -54,4 +50,8 @@ pub enum ErrorCode {
     InvalidAgentStatus,
     #[msg("Vault has leftover funds from previous goal")]
     VaultHasLeftoverFunds,
+    #[msg("Invalid validator message")]
+    InvalidValidatorMessage,
+    #[msg("Invalid ipfs CID")]
+    InvalidCID,
 }
