@@ -151,7 +151,7 @@ impl<'info> SubmitTaskValidation<'info> {
 
         let message = SubmitTaskValidationMessage::deserialize(msg_bytes)?;
 
-        // Verify message matches accounts
+        // Verify message matches
         require!(
             message.goal_id == self.goal.goal_slot_id,
             ErrorCode::InvalidValidatorMessage
@@ -278,6 +278,7 @@ impl<'info> SubmitTaskValidation<'info> {
         } else {
             // Validation rejected
             // Release lock
+
             self.goal.locked_for_tasks = self
                 .goal
                 .locked_for_tasks
