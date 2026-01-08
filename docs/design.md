@@ -331,13 +331,11 @@ sequenceDiagram
     VN->>VN: Verify agent_config_cid matches<br/>network approved config
     
     alt Config Valid
-        VN->>TEE: Sign validation
-        TEE->>VN: Return tee_signature
-        VN->>DAC: validate_agent(tee_signature)
-        DAC->>DAC: Set status = Active
+        VN->>DAC: validate_agent()
+        DAC->>DAC: Verify agent.status == Pending<br/>Set status = Active
+        Note over DAC: TODO: Add TEE signature verification<br/>and agent config validation
     else Config Invalid
-        VN->>DAC: Reject agent
-        DAC->>DAC: Set status = Inactive
+        Note over VN: Rejection not yet implemented<br/>(will set status = Inactive)
     end
 ```
 
@@ -347,7 +345,7 @@ Goal account that defines objectives for agents to achieve. Each goal has an ass
 
 The Goal PDA stores:
 - `goal_slot_id`: Unique slot identifier for the goal
-- `owner`: Goal owner public key
+- `owner`: Goal owner public key (Pubkey::default() if unowned/public, allowing anyone to set the goal)
 - `agent`: Associated agent public key
 - `task`: Associated task public key
 - `status`: Current status of the goal (Ready, Active)
@@ -357,16 +355,25 @@ The Goal PDA stores:
 - `task_index_at_goal_start`: Task index when goal started
 - `task_index_at_goal_end`: Task index when goal ended
 - `chain_proof`: SHA256 chain proof for data integrity (chained from genesis, updated only after TEE validation)
-- `vault`: Goal vault PDA address (SystemAccount holding SOL)
 - `total_shares`: Total shares issued for this goal (share-based accounting)
 - `locked_for_tasks`: Total SOL locked for currently processing tasks (max cost locked when claimed, released after validation)
+- `vault_bump`: Vault PDA bump seed
 - `bump`: Goal PDA bump seed
+
+**Goal Ownership:**
+- Goals can be unowned (owner = Pubkey::default()) - anyone can set these goals
+- Goals can be owned (owner = specific pubkey) - only the owner can set these goals
+- After goal completion, goals can become unowned (public), allowing reuse by anyone
 
 **Share-Based Accounting:**
 - Contributors receive shares when depositing SOL
-- Share price = (vault.lamports() - locked_for_tasks) / total_shares
+- Share price calculation:
+  - If `total_shares == 0`: share_price = 1.0 (first deposit or all funds withdrawn)
+  - Else: share_price = (vault.lamports() - locked_for_tasks - rent_exempt_minimum) / total_shares
+  - Note: Rent lamports are excluded from share price calculation (they're for account maintenance, not user deposits)
 - Share price automatically adjusts as tasks are paid (vault decreases)
 - Withdrawals/refunds calculated as: shares × share_price
+- If all funds are withdrawn (total_shares == 0), the next contribution treats it as a fresh start (share_price = 1.0)
 
 Seeds: `["goal", network_config, goal_slot_id.to_le_bytes()]`
 
@@ -397,13 +404,13 @@ sequenceDiagram
     participant DAC as Smart Contract
     participant Vault as Goal Vault PDA
     
-    Owner->>DAC: create_goal()
-    DAC->>DAC: Create Goal (Ready)
+    Owner->>DAC: create_goal(is_public)
+    DAC->>DAC: Create Goal (Ready)<br/>Set owner = Pubkey::default() if is_public,<br/>otherwise set owner = owner.key()
     
-    Owner->>DAC: set_goal(specification_cid, max_iterations, agent, initial_deposit)
-    DAC->>DAC: Initialize Vault PDA<br/>Create Contribution account<br/>share_price = 1.0 (first deposit)
+    Owner->>DAC: set_goal(specification_cid, max_iterations, initial_deposit)
+    DAC->>DAC: Verify task.status == Ready<br/>Verify agent.status == Active<br/>Verify vault only has rent or is empty<br/>Initialize Vault PDA<br/>Create Contribution account<br/>share_price = 1.0 (first deposit)
     Owner->>Vault: Transfer initial_deposit
-    DAC->>DAC: Mint shares = initial_deposit / 1.0<br/>contribution.shares = shares<br/>goal.total_shares = shares<br/>Set status = Active
+    DAC->>DAC: Mint shares = initial_deposit / 1.0<br/>contribution.shares = shares<br/>goal.total_shares = shares<br/>Set goal.agent = agent.key()<br/>Set goal.task = task.key()<br/>Set task.status = Pending<br/>Set task.agent = agent.key()<br/>Set task.action_type = Llm<br/>Set goal status = Active
     
     loop Contribution & Computing Phase (Active)
         Contributor->>DAC: contribute_to_goal(deposit_amount)
@@ -438,6 +445,7 @@ The Contribution PDA stores:
 - Share value automatically decreases as tasks consume vault funds
 
 Seeds: `["contribution", goal.key(), contributor.key()]`
+
 
 #### Sequence - Contribution & Refund Flow
 
@@ -521,7 +529,7 @@ Seeds: `["task", network_config, task_slot_id.to_le_bytes()]`
 ```mermaid
 stateDiagram-v2
     [*] --> Ready: create_task() or<br/>initialize_network()
-    Ready --> Pending: (assigned to goal)<br/>(clear old input_cid/output_cid if reusing)
+    Ready --> Pending: set_goal()<br/>(task assigned to goal,<br/>status = Pending, agent set, action_type = Llm)
     Pending --> Processing: claim_task(compute_node, max_task_cost)<br/>(locks max_task_cost)
     Processing --> AwaitingValidation: submit_task_result(output_cid)
     AwaitingValidation --> Pending: submit_task_validation()<br/>(approved, goal not complete)<br/>(lock released)
@@ -543,7 +551,7 @@ sequenceDiagram
     CN->>RPC: Subscribe to Task account changes<br/>(status = Pending)
     VN->>RPC: Subscribe to Task status changes<br/>(AwaitingValidation)
     
-    Note over DAC: Task already exists<br/>status = Pending<br/>input_cid and output_cid set
+    Note over DAC: Task assigned to goal in set_goal()<br/>status = Pending, agent set, action_type = Llm
     
     RPC->>CN: Notify Task status change<br/>(Pending)
     
@@ -635,7 +643,7 @@ sequenceDiagram
     rect rgb(200, 230, 255)
         Note over Owner,Vault: PHASE 1: CONTRIBUTION (Active)
         
-        Owner->>DAC: set_goal(initial_deposit)
+        Owner->>DAC: set_goal(specification_cid, max_iterations, initial_deposit)
         DAC->>DAC: Create Vault PDA<br/>share_price = 1.0 (first deposit)
         Owner->>Vault: Transfer initial_deposit
         DAC->>DAC: Mint shares = initial_deposit / 1.0<br/>contribution.shares = shares<br/>goal.total_shares = shares
@@ -684,12 +692,12 @@ sequenceDiagram
         DAC->>DAC: Calculate share_price = vault / total_shares
         
         loop For each contributor with shares > 0
-            DAC->>DAC: Calculate refund = shares × share_price
+            DAC->>DAC: Calculate refund = contribution.shares × share_price
             Vault->>Contributor: Transfer refund automatically
             DAC->>Contrib: refund_amount = refund<br/>shares = 0
         end
         
-        DAC->>DAC: total_shares = 0
+        DAC->>DAC: total_shares = 0 (all tokens burned)
         
     end
     
@@ -795,7 +803,7 @@ sequenceDiagram
         loop For each contributor with shares > 0
             DAC->>DAC: Calculate refund = contribution.shares × share_price
             Vault->>Contributor: Transfer refund automatically
-            DAC->>DAC: Record refund_amount = refund<br/>shares = 0
+            DAC->>Contrib: refund_amount = refund<br/>shares = 0
         end
         
         DAC->>DAC: total_shares = 0

@@ -38,4 +38,20 @@ pub enum ErrorCode {
     InvalidValidatorTeeSigningPubkey,
     #[msg("Invalid compute node pubkey")]
     InvalidComputeNodePubkey,
+    #[msg("Invalid goal status")]
+    InvalidGoalStatus,
+    #[msg("Underflow")]
+    Underflow,
+    #[msg("Insufficient balance")]
+    InsufficientBalance,
+    #[msg("Deposit too small")]
+    DepositTooSmall,
+    #[msg("Invalid goal owner")]
+    InvalidGoalOwner,
+    #[msg("Invalid task status")]
+    InvalidTaskStatus,
+    #[msg("Invalid agent status")]
+    InvalidAgentStatus,
+    #[msg("Vault has leftover funds from previous goal")]
+    VaultHasLeftoverFunds,
 }

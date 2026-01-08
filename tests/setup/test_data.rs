@@ -1,4 +1,4 @@
-use dac_client::dac::types::{CodeMeasurement, SemanticVersion};
+use dac_client::types::{CodeMeasurement, SemanticVersion};
 use sha2::Digest;
 
 // Program paths and IDs
@@ -30,3 +30,8 @@ pub const DEFAULT_CODE_MEASUREMENT: [u8; 32] = [1u8; 32];
 
 // Agent test data
 pub const DEFAULT_AGENT_CONFIG_CID: &str = "QmAgentConfigCID";
+
+// Goal test data
+pub const DEFAULT_GOAL_SPECIFICATION_CID: &str = "QmGoalSpecificationCID";
+pub const DEFAULT_INITIAL_DEPOSIT: u64 = 1_000_000_000; // 1 SOL
+pub const DEFAULT_CONTRIBUTION_AMOUNT: u64 = 500_000_000; // 0.5 SOL

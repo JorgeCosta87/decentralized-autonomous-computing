@@ -118,17 +118,13 @@ This document contains user stories and technical implementation details for all
 **So that** only approved agents can execute tasks
 
 **Technical Implementation:**
-- **Instruction**: `validate_agent(agent_slot_id, approved, tee_signature)`
-- **Accounts**: ValidatorNode (signer), NetworkConfig, Agent (mut)
+- **Instruction**: `validate_agent()`
+- **Accounts**: Validator (signer, mut), Agent (mut), NetworkConfig
 - **Guards**:
   - `agent.status == Pending`
-  - TEE signature verification passes
-  - Agent config CID matches network-approved configuration
 - **Actions**:
-  - If approved:
-    - Sets agent.status = Active
-  - If rejected:
-    - Sets agent.status = Inactive
+  - Sets agent.status = Active
+  - Note: For now, validation is simplified. TODO: Add TEE signature verification and agent config validation
 
 ## Task Execution
 
@@ -236,10 +232,13 @@ This document contains user stories and technical implementation details for all
 **So that** I can later configure and fund it
 
 **Technical Implementation:**
-- **Instruction**: `create_goal()`
-- **Accounts**: GoalOwner (signer), NetworkConfig (mut), Goal (init), SystemProgram
+- **Instruction**: `create_goal(is_public: bool)`
+- **Accounts**: Payer (signer, mut), Owner (signer, mut), NetworkConfig (mut), Goal (init), SystemProgram
+- **Parameters**:
+  - `is_public`: If `true`, goal owner is set to `Pubkey::default()` (public, anyone can set this goal). If `false`, goal owner is set to the provided owner.
 - **Actions**:
   - Creates Goal PDA with goal_slot_id = goal_count
+  - Sets owner: `Pubkey::default()` if `is_public == true`, otherwise sets to `owner.key()`
   - Sets status = Ready
   - Sets chain_proof = genesis_hash (or continues from previous if reusing)
   - Increments network_config.goal_count
@@ -251,22 +250,40 @@ This document contains user stories and technical implementation details for all
 **So that** agents can work towards achieving it
 
 **Technical Implementation:**
-- **Instruction**: `set_goal(specification_cid, max_iterations, agent, initial_deposit)`
-- **Accounts**: Goal, Vault (init), Owner Contribution (init), Owner (signer, mut)
+- **Instruction**: `set_goal(specification_cid, max_iterations, initial_deposit)`
+- **Accounts**: Goal (mut), Vault (init), Owner Contribution (init), Task (mut), Agent, Owner (signer, mut), NetworkConfig, SystemProgram
+- **Guards**: 
+  - `goal.status == Ready`
+  - `goal.owner == Pubkey::default() || goal.owner == owner.key()` (goal must be unowned or owned by caller)
+  - `task.status == TaskStatus::Ready` (task must be ready to be assigned)
+  - `agent.status == AgentStatus::Active` (agent must be validated and active)
+  - Vault must only contain rent lamports or be empty (no leftover funds from previous goal)
 - **Actions**:
   - If goal.status == Ready and goal.current_iteration > 0 (reusing goal):
     - Resets execution state: `current_iteration = 0`, `task_index_at_goal_start = task_index_at_goal_end`, `task_index_at_goal_end = 0`
     - Resets payment state: `total_shares = 0`, `locked_for_tasks = 0`
     - Preserves chain_proof (continues audit trail)
     - Can update specification_cid
-  - Creates goal vault SystemAccount PDA (if not exists)
-  - Transfers initial_deposit from owner to vault
+  - Creates goal vault SystemAccount PDA with initial_deposit + rent (or transfers initial_deposit if vault exists)
   - Creates owner's contribution account
   - Calculates share_price = 1.0 (first deposit)
   - Mints shares: `shares = initial_deposit / 1.0 = initial_deposit`
   - Sets contribution.shares = shares
   - Sets goal.total_shares = shares
+  - Sets goal.owner = owner.key()
+  - Sets goal.agent = agent.key()
+  - Sets goal.task = task.key()
+  - Sets goal.vault_bump = vault bump
+  - Sets goal.task_index_at_goal_start = task.execution_count
   - Sets goal status to Active
+  - **Assigns task to goal:**
+    - Sets `task.status = TaskStatus::Pending`
+    - Sets `task.agent = agent.key()`
+    - Sets `task.action_type = ActionType::Llm`
+    - Sets `goal.task_index_at_goal_start = task.execution_count`
+    - Note: Task account must be provided and must have status = Ready
+    - Note: Agent account must be provided and must have status = Active
+  - Note: Goals with owner = Pubkey::default() are public and can be set by anyone
 
 ### User Story: Contribute to a Goal
 **As a** contributor  
@@ -275,17 +292,18 @@ This document contains user stories and technical implementation details for all
 
 **Technical Implementation:**
 - **Instruction**: `contribute_to_goal(deposit_amount)`
-- **Accounts**: Goal (mut), Vault (mut), Contribution (init_if_needed), Contributor (signer, mut)
+- **Accounts**: Goal (mut), Vault (mut), Contribution (init_if_needed), Contributor (signer, mut), SystemProgram
 - **Guards**: `goal.status == Active`, `deposit_amount > 0`
 - **Actions**:
   - Calculates current share_price:
-    - If `goal.total_shares == 0`: share_price = 1.0 (first deposit)
+    - If `goal.total_shares == 0`: share_price = 1.0 (first deposit or all funds previously withdrawn)
     - Else: `share_price = (vault.lamports() - goal.locked_for_tasks) / goal.total_shares`
   - Calculates shares_to_mint: `deposit_amount / share_price`
-  - Transfers deposit_amount from contributor to vault
-  - Creates/updates contributor's contribution account
+  - Transfers deposit_amount from contributor to vault using system_program::transfer
+  - Creates/updates contributor's contribution account (init_if_needed)
   - Increments contribution.shares by shares_to_mint
   - Increments goal.total_shares by shares_to_mint
+  - Note: If total_shares == 0 (all funds withdrawn), next contribution treats it as fresh start
   - Note: Contributor now owns a proportional percentage of the vault
 
 ### User Story: Withdraw from a Goal
@@ -295,7 +313,7 @@ This document contains user stories and technical implementation details for all
 
 **Technical Implementation:**
 - **Instruction**: `withdraw_from_goal(shares_to_burn)`
-- **Accounts**: Goal (mut), Vault (mut), Contribution (mut), Contributor (signer, mut)
+- **Accounts**: Goal (mut), Vault (mut), Contribution (mut), Contributor (signer, mut), SystemProgram
 - **Guards**: 
   - `goal.status == Active`
   - `shares_to_burn > 0`
@@ -304,9 +322,10 @@ This document contains user stories and technical implementation details for all
   - Calculates current share_price: `(vault.lamports() - goal.locked_for_tasks) / goal.total_shares`
   - Calculates withdraw_amount: `shares_to_burn × share_price`
   - Verifies available balance: `withdraw_amount <= (vault.lamports() - goal.locked_for_tasks)`
-  - Transfers withdraw_amount from vault to contributor
+  - Transfers withdraw_amount from vault (PDA) to contributor using system_program::transfer with PDA signer
   - Decrements contribution.shares by shares_to_burn
   - Decrements goal.total_shares by shares_to_burn
+  - Note: If all shares are withdrawn (total_shares == 0), goal can accept new contributions at share_price = 1.0
   - Note: Contributor receives their proportional share of available vault balance
 
 ### User Story: Cancel a Goal
@@ -316,7 +335,7 @@ This document contains user stories and technical implementation details for all
 
 **Technical Implementation:**
 - **Instruction**: `cancel_goal()`
-- **Accounts**: Goal (mut), Vault (mut), All Contribution accounts (mut), Owner (signer)
+- **Accounts**: Goal (mut), Vault (mut), All Contribution accounts (mut), Owner (signer), SystemProgram
 - **Guards**: `goal.status == Active`, `owner.key() == goal.owner`
 - **Actions**:
   - Calculates current share_price: `vault.lamports() / goal.total_shares` (if locked_for_tasks > 0, this includes locked funds)
