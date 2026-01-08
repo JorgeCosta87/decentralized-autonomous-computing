@@ -1,0 +1,3 @@
+[submodule "nodes/agent-compute-node"]
+	path = nodes/compute-node
+	url = https://github.com/JorgeCosta87/agent-compute-node.git
