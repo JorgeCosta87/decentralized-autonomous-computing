@@ -20,8 +20,9 @@ pub struct Goal {
     pub current_iteration: u64,
     pub task_index_at_goal_start: u64,
     pub task_index_at_goal_end: u64,
-    pub chain_proof: [u8; 32],
     pub total_shares: u64,
     pub locked_for_tasks: u64,
+    pub chain_proof: [u8; 32],
+    pub vault_bump: u8,
     pub bump: u8,
 }

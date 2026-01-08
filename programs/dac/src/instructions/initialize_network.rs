@@ -110,7 +110,7 @@ impl<'info> InitializeNetwork<'info> {
 
             let goal_data = Goal {
                 goal_slot_id: goal_id,
-                owner: authority.key(),
+                owner: Pubkey::default(),
                 agent: Pubkey::default(),
                 task: Pubkey::default(),
                 specification_cid: "".to_string(),
@@ -122,6 +122,7 @@ impl<'info> InitializeNetwork<'info> {
                 chain_proof: genesis_hash,
                 total_shares: 0,
                 locked_for_tasks: 0,
+                vault_bump: 0,
                 bump,
             };
 
