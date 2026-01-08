@@ -74,8 +74,9 @@ pub struct SubmitTaskValidation<'info> {
     )]
     pub network_config: Account<'info, NetworkConfig>,
 
-    #[account(address = ix_sysvar::Instructions::id())]
-    pub instruction_sysvar: AccountInfo<'info>,
+        /// CHECK: Check if the instruction is from the Ed25519 program
+        #[account(address = ix_sysvar::Instructions::id())]
+        pub instruction_sysvar: AccountInfo<'info>,
 
     pub system_program: Program<'info, System>,
 }
