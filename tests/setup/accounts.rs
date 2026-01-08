@@ -1,7 +1,8 @@
-use dac_client::dac::accounts::{Agent, NetworkConfig};
+use dac_client::accounts::{Agent, Contribution, Goal, NetworkConfig, NodeInfo, Task};
 use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey};
 
 use crate::setup::TestFixture;
+
 
 pub trait Accounts {
     fn find_network_config_pda(&self, authority: &Pubkey) -> (Pubkey, u8);
@@ -18,9 +19,14 @@ pub trait Accounts {
     ) -> Vec<AccountMeta>;
     fn find_node_info_pda(&self, node_pubkey: &Pubkey) -> (Pubkey, u8);
     fn find_node_treasury_pda(&self, node_info: &Pubkey) -> (Pubkey, u8);
-    fn get_node_info(&self, node_pubkey: &Pubkey) -> dac_client::dac::accounts::NodeInfo;
+    fn get_node_info(&self, node_pubkey: &Pubkey) -> NodeInfo;
     fn find_agent_pda(&self, network_config: &Pubkey, agent_slot_id: u64) -> (Pubkey, u8);
     fn get_agent(&self, network_config: &Pubkey, agent_slot_id: u64) -> Agent;
+    fn find_goal_vault_pda(&self, goal: &Pubkey) -> (Pubkey, u8);
+    fn get_goal(&self, network_config: &Pubkey, goal_slot_id: u64) -> Goal;
+    fn find_contribution_pda(&self, goal: &Pubkey, contributor: &Pubkey) -> (Pubkey, u8);
+    fn get_contribution(&self, goal: &Pubkey, contributor: &Pubkey) -> Contribution;
+    fn get_task(&self, network_config: &Pubkey, task_slot_id: u64) -> Task;
 }
 
 impl Accounts for TestFixture {
@@ -104,7 +110,7 @@ impl Accounts for TestFixture {
         Pubkey::find_program_address(seeds, &self.program_id)
     }
 
-    fn get_node_info(&self, node_pubkey: &Pubkey) -> dac_client::dac::accounts::NodeInfo {
+    fn get_node_info(&self, node_pubkey: &Pubkey) -> NodeInfo {
         let addr = self.find_node_info_pda(node_pubkey).0;
 
         let account = self
@@ -112,16 +118,12 @@ impl Accounts for TestFixture {
             .get_account(&addr)
             .expect("NodeInfo account not found");
 
-        dac_client::dac::accounts::NodeInfo::from_bytes(&account.data)
+        NodeInfo::from_bytes(&account.data)
             .expect("Failed to deserialize NodeInfo account")
     }
 
     fn find_agent_pda(&self, network_config: &Pubkey, agent_slot_id: u64) -> (Pubkey, u8) {
-        let seeds = &[
-            b"agent",
-            network_config.as_ref(),
-            &agent_slot_id.to_le_bytes(),
-        ];
+        let seeds = &[b"agent", network_config.as_ref(), &agent_slot_id.to_le_bytes()];
         Pubkey::find_program_address(seeds, &self.program_id)
     }
 
@@ -133,6 +135,53 @@ impl Accounts for TestFixture {
             .get_account(&addr)
             .expect("Agent account not found");
 
-        Agent::from_bytes(&account.data).expect("Failed to deserialize Agent account")
+        Agent::from_bytes(&account.data)
+            .expect("Failed to deserialize Agent account")
+    }
+
+    fn find_goal_vault_pda(&self, goal: &Pubkey) -> (Pubkey, u8) {
+        let seeds = &[b"goal_vault", goal.as_ref()];
+        Pubkey::find_program_address(seeds, &self.program_id)
+    }
+
+    fn get_goal(&self, network_config: &Pubkey, goal_slot_id: u64) -> Goal {
+        let addr = self.find_goal_pda(network_config, goal_slot_id).0;
+
+        let account = self
+            .svm
+            .get_account(&addr)
+            .expect("Goal account not found");
+
+        Goal::from_bytes(&account.data)
+            .expect("Failed to deserialize Goal account")
+    }
+
+    fn find_contribution_pda(&self, goal: &Pubkey, contributor: &Pubkey) -> (Pubkey, u8) {
+        let seeds = &[b"contribution", goal.as_ref(), contributor.as_ref()];
+        Pubkey::find_program_address(seeds, &self.program_id)
+    }
+
+    fn get_contribution(&self, goal: &Pubkey, contributor: &Pubkey) -> Contribution {
+        let addr = self.find_contribution_pda(goal, contributor).0;
+
+        let account = self
+            .svm
+            .get_account(&addr)
+            .expect("Contribution account not found");
+
+        Contribution::from_bytes(&account.data)
+            .expect("Failed to deserialize Contribution account")
+    }
+
+    fn get_task(&self, network_config: &Pubkey, task_slot_id: u64) -> Task {
+        let addr = self.find_task_pda(network_config, task_slot_id).0;
+
+        let account = self
+            .svm
+            .get_account(&addr)
+            .expect("Task account not found");
+
+        Task::from_bytes(&account.data)
+            .expect("Failed to deserialize Task account")
     }
 }

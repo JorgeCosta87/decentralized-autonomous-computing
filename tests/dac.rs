@@ -1,8 +1,10 @@
 use crate::setup::test_data::*;
+use crate::setup::test_data::{DEFAULT_GOAL_SPECIFICATION_CID, DEFAULT_INITIAL_DEPOSIT, DEFAULT_CONTRIBUTION_AMOUNT};
 use crate::setup::Accounts;
 use crate::setup::Helpers;
 use crate::setup::Instructions;
 use crate::setup::TestFixture;
+use dac_client::{ActionType, AgentStatus, GoalStatus, NodeStatus, NodeType, TaskStatus};
 use solana_sdk::signature::Signer;
 use utils::Utils;
 
@@ -101,7 +103,7 @@ fn test_register_compute_node() {
     let result = fixt.register_node(
         &fixt.compute_node_owner.insecure_clone(),
         &compute_node_pubkey,
-        dac_client::dac::types::NodeType::Compute,
+        NodeType::Compute,
     );
 
     match result {
@@ -114,11 +116,11 @@ fn test_register_compute_node() {
             assert_eq!(node_info.node_pubkey, compute_node_pubkey);
             assert_eq!(
                 node_info.node_type,
-                dac_client::dac::types::NodeType::Compute
+                NodeType::Compute
             );
             assert_eq!(
                 node_info.status,
-                dac_client::dac::types::NodeStatus::PendingClaim
+                NodeStatus::PendingClaim
             );
             assert_eq!(node_info.node_info_cid, None);
             assert_eq!(node_info.max_entries_before_transfer, 64);
@@ -138,7 +140,7 @@ fn test_register_validator_node() {
     let result = fixt.register_node(
         &fixt.validator_node_owner.insecure_clone(),
         &validator_node_pubkey,
-        dac_client::dac::types::NodeType::Validator,
+        NodeType::Validator,
     );
 
     match result {
@@ -151,11 +153,11 @@ fn test_register_validator_node() {
             assert_eq!(node_info.node_pubkey, validator_node_pubkey);
             assert_eq!(
                 node_info.node_type,
-                dac_client::dac::types::NodeType::Validator
+                NodeType::Validator
             );
             assert_eq!(
                 node_info.status,
-                dac_client::dac::types::NodeStatus::PendingClaim
+                NodeStatus::PendingClaim
             );
             assert_eq!(node_info.code_measurement, None);
             assert_eq!(network_config.validator_node_count, 0);
@@ -182,7 +184,7 @@ fn test_claim_compute_node() {
 
             assert_eq!(
                 node_info.status,
-                dac_client::dac::types::NodeStatus::AwaitingValidation
+                NodeStatus::AwaitingValidation
             );
             assert_eq!(
                 node_info.node_info_cid,
@@ -211,7 +213,7 @@ fn test_claim_validator_node() {
             let node_info = fixt.get_node_info(&fixt.validator_node.pubkey());
             let network_config = fixt.get_network_config(&fixt.authority.pubkey());
 
-            assert_eq!(node_info.status, dac_client::dac::types::NodeStatus::Active);
+            assert_eq!(node_info.status, NodeStatus::Active);
             assert_eq!(node_info.code_measurement, Some(DEFAULT_CODE_MEASUREMENT));
             assert_eq!(
                 node_info.tee_signing_pubkey,
@@ -249,7 +251,7 @@ fn test_validate_compute_node() {
             let node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
             let network_config = fixt.get_network_config(&fixt.authority.pubkey());
 
-            assert_eq!(node_info.status, dac_client::dac::types::NodeStatus::Active);
+            assert_eq!(node_info.status, NodeStatus::Active);
             assert_eq!(node_info.total_tasks_completed, 0);
             assert_eq!(node_info.total_earned, 0);
             assert_eq!(network_config.compute_node_count, 1);
@@ -285,7 +287,7 @@ fn test_validate_compute_node_not_approved() {
 
             assert_eq!(
                 node_info.status,
-                dac_client::dac::types::NodeStatus::Rejected
+                NodeStatus::Rejected
             );
         }
         Err(e) => panic!("Failed to validate compute node not approved: {:#?}", e),
@@ -394,7 +396,7 @@ fn test_create_agent() {
             assert_eq!(agent.owner, agent_owner.pubkey());
             assert_eq!(agent.agent_config_cid, DEFAULT_AGENT_CONFIG_CID.to_string());
             assert_eq!(agent.agent_memory_cid, None);
-            assert_eq!(agent.status, dac_client::dac::types::AgentStatus::Pending);
+            assert_eq!(agent.status, AgentStatus::Pending);
             assert_eq!(network_config.agent_count, 1);
         }
         Err(e) => panic!("Failed to create agent: {:#?}", e),
@@ -431,4 +433,203 @@ fn test_create_multiple_agents() {
         agent1.agent_config_cid,
         "QmSecondAgentConfigCID".to_string()
     );
+}
+
+#[test]
+fn test_set_goal() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_create_agent()
+        .with_validated_agent(0);
+
+    let authority = fixt.authority.insecure_clone();
+    let goal_owner = fixt.create_keypair();
+    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+    // Set goal
+    let result2 = fixt.set_goal(
+        &goal_owner,
+        0,
+        DEFAULT_GOAL_SPECIFICATION_CID.to_string(),
+        10,
+        0, // agent_slot_id
+        0, // task_slot_id
+        DEFAULT_INITIAL_DEPOSIT,
+    );
+
+    match result2 {
+        Ok(_) => {
+            fixt.svm.print_transaction_logs(&result2.unwrap());
+            let goal = fixt.get_goal(&network_config_pda, 0);
+            let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
+            let owner_contribution = fixt.get_contribution(&goal_pda, &goal_owner.pubkey());
+            let (task_pda, _) = fixt.find_task_pda(&network_config_pda, 0);
+            let task = fixt.get_task(&network_config_pda, 0);
+            let (agent_pda, _) = fixt.find_agent_pda(&network_config_pda, 0);
+
+            // Verify goal was set
+            assert_eq!(goal.owner, goal_owner.pubkey());
+            assert_eq!(goal.agent, agent_pda);
+            assert_eq!(goal.specification_cid, DEFAULT_GOAL_SPECIFICATION_CID.to_string());
+            assert_eq!(goal.max_iterations, 10);
+            assert_eq!(goal.status, GoalStatus::Active);
+            assert_eq!(goal.total_shares, DEFAULT_INITIAL_DEPOSIT);
+            assert_eq!(goal.task, task_pda);
+
+            // Verify owner's contribution was created
+            assert_eq!(owner_contribution.goal, goal_pda);
+            assert_eq!(owner_contribution.contributor, goal_owner.pubkey());
+            assert_eq!(owner_contribution.shares, DEFAULT_INITIAL_DEPOSIT);
+            assert_eq!(owner_contribution.refund_amount, 0);
+
+            // Verify task was updated correctly
+            let (agent_pda, _) = fixt.find_agent_pda(&network_config_pda, 0);
+            assert_eq!(task.status, TaskStatus::Pending);
+            assert_eq!(task.agent, agent_pda);
+            assert_eq!(task.action_type, ActionType::Llm);
+        }
+        Err(e) => panic!("Failed to set goal: {:#?}", e),
+    }
+}
+
+#[test]
+fn test_contribute_to_goal() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_create_agent()
+        .with_validated_agent(0);
+
+    let authority = fixt.authority.insecure_clone();
+    let contributor = fixt.create_keypair();
+    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+
+    let mut fixt = fixt.with_set_goal(0, 0);
+
+    let result = fixt.contribute_to_goal(
+        &contributor,
+        0,
+        DEFAULT_CONTRIBUTION_AMOUNT,
+    );
+
+    match result {
+        Ok(_) => {
+            fixt.svm.print_transaction_logs(&result.unwrap());
+            let goal = fixt.get_goal(&network_config_pda, 0);
+            let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
+            let contribution = fixt.get_contribution(&goal_pda, &contributor.pubkey());
+
+            assert_eq!(contribution.goal, goal_pda);
+            assert_eq!(contribution.contributor, contributor.pubkey());
+            assert!(contribution.shares > 0, "Contributor should have shares");
+            assert_eq!(contribution.refund_amount, 0);
+
+            assert!(goal.total_shares > DEFAULT_INITIAL_DEPOSIT, "Total shares should include contributor's shares");
+        }
+        Err(e) => panic!("Failed to contribute to goal: {:#?}", e),
+    }
+}
+
+#[test]
+fn test_contribute_to_goal_multiple_contributors() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_create_agent()
+        .with_validated_agent(0);
+        
+    let authority = fixt.authority.insecure_clone();
+    let goal_owner = fixt.create_keypair();
+    let contributor1 = fixt.create_keypair();
+    let contributor2 = fixt.create_keypair();
+    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+
+    let result = fixt.set_goal(
+        &goal_owner,
+        0,
+        DEFAULT_GOAL_SPECIFICATION_CID.to_string(),
+        10,
+        0,
+        0,
+        DEFAULT_INITIAL_DEPOSIT,
+    );
+    assert!(result.is_ok(), "Failed to set goal: {:#?}", result.err());
+
+    // First contribution
+    let result1 = fixt.contribute_to_goal(
+        &contributor1,
+        0,
+        DEFAULT_CONTRIBUTION_AMOUNT,
+    );
+    assert!(result1.is_ok(), "Failed first contribution");
+
+    // Second contribution
+    let result2 = fixt.contribute_to_goal(
+        &contributor2,
+        0,
+        DEFAULT_CONTRIBUTION_AMOUNT,
+    );
+    assert!(result2.is_ok(), "Failed second contribution");
+
+    let goal = fixt.get_goal(&network_config_pda, 0);
+    let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
+    let contribution1 = fixt.get_contribution(&goal_pda, &contributor1.pubkey());
+    let contribution2 = fixt.get_contribution(&goal_pda, &contributor2.pubkey());
+
+    assert!(contribution1.shares > 0, "Contributor1 should have shares");
+    assert!(contribution2.shares > 0, "Contributor2 should have shares");
+
+    println!("Total shares: {}", goal.total_shares);
+    println!("Contribution1 shares: {}", contribution1.shares);
+    println!("Contribution2 shares: {}", contribution2.shares);
+    println!("Initial deposit: {}", DEFAULT_INITIAL_DEPOSIT);
+    println!("Contribution amount: {}", DEFAULT_CONTRIBUTION_AMOUNT);
+    println!("Total contributions: {}", DEFAULT_CONTRIBUTION_AMOUNT * 2);
+    println!("Total shares should be sum of all contributions: {}", DEFAULT_INITIAL_DEPOSIT + DEFAULT_CONTRIBUTION_AMOUNT * 2);
+
+    assert!(goal.total_shares >= DEFAULT_INITIAL_DEPOSIT + DEFAULT_CONTRIBUTION_AMOUNT * 2, 
+            "Total shares should include all contributions");
+}
+
+#[test]
+fn test_withdraw_from_goal() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_create_agent()
+        .with_validated_agent(0)
+        .with_set_goal(0, 0)
+        .with_contribute_to_goal(0, DEFAULT_CONTRIBUTION_AMOUNT);
+    
+    let authority = fixt.authority.insecure_clone();
+    let contributor = fixt.contributor.insecure_clone();
+    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+
+
+    let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
+    let contribution_before = fixt.get_contribution(&goal_pda, &contributor.pubkey());
+    let goal_before = fixt.get_goal(&network_config_pda, 0);
+    let shares_to_burn = contribution_before.shares / 2;
+
+    let result = fixt.withdraw_from_goal(&contributor, 0, shares_to_burn);
+
+    match result {
+        Ok(_) => {
+            fixt.svm.print_transaction_logs(&result.unwrap());
+            let goal_after = fixt.get_goal(&network_config_pda, 0);
+            let contribution_after = fixt.get_contribution(&goal_pda, &contributor.pubkey());
+
+            assert_eq!(
+                contribution_after.shares,
+                contribution_before.shares - shares_to_burn,
+                "Contribution shares should decrease"
+            );
+
+            assert_eq!(
+                goal_after.total_shares,
+                goal_before.total_shares - shares_to_burn,
+                "Goal total shares should decrease"
+            );
+
+            assert_eq!(contribution_after.goal, goal_pda);
+            assert_eq!(contribution_after.contributor, contributor.pubkey());
+        }
+        Err(e) => panic!("Failed to withdraw from goal: {:#?}", e),
+    }
 }

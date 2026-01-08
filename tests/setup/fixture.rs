@@ -1,3 +1,4 @@
+use dac_client::NodeType;
 use litesvm::LiteSVM;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
@@ -16,13 +17,14 @@ pub struct TestFixture {
     pub payer: Keypair,
     pub authority: Keypair,
 
-    // Node keypairs for testing
+    // Keypairs for testing
     pub compute_node_owner: Keypair,
     pub compute_node: Keypair,
     pub validator_node_owner: Keypair,
     pub validator_node: Keypair,
     pub tee_signing_keypair: Keypair,
     pub agent_owner: Keypair,
+    pub contributor: Keypair,
 }
 
 impl TestFixture {
@@ -40,7 +42,6 @@ impl TestFixture {
         svm.airdrop(&authority.pubkey(), 10 * LAMPORTS_PER_SOL)
             .expect("Failed to fund authority");
 
-        // Create and fund node keypairs
         let compute_node_owner = Keypair::new();
         svm.airdrop(&compute_node_owner.pubkey(), 10 * LAMPORTS_PER_SOL)
             .expect("Failed to fund compute_node_owner");
@@ -63,6 +64,10 @@ impl TestFixture {
         svm.airdrop(&agent_owner.pubkey(), 10 * LAMPORTS_PER_SOL)
             .expect("Failed to fund agent_owner");
 
+        let contributor = Keypair::new();
+        svm.airdrop(&contributor.pubkey(), 10 * LAMPORTS_PER_SOL)
+            .expect("Failed to fund contributor");
+
         Self {
             svm,
             program_id,
@@ -74,13 +79,14 @@ impl TestFixture {
             validator_node,
             tee_signing_keypair,
             agent_owner,
+            contributor,
         }
     }
 
     pub fn create_keypair(&mut self) -> Keypair {
         let keypair = Keypair::new();
         self.svm
-            .airdrop(&keypair.pubkey(), LAMPORTS_PER_SOL)
+            .airdrop(&keypair.pubkey(), LAMPORTS_PER_SOL * 10)
             .expect("Failed to fund keypair");
         keypair
     }
@@ -111,7 +117,7 @@ impl TestFixture {
         let result = self.register_node(
             &self.compute_node_owner.insecure_clone(),
             &self.compute_node.pubkey(),
-            dac_client::dac::types::NodeType::Compute,
+            NodeType::Compute,
         );
         assert!(result.is_ok(), "Failed to register compute node");
         self
@@ -123,7 +129,7 @@ impl TestFixture {
         let result = self.register_node(
             &validator_node_owner,
             &validator_node_pubkey,
-            dac_client::dac::types::NodeType::Validator,
+            NodeType::Validator,
         );
         assert!(result.is_ok(), "Failed to register validator node");
         self
@@ -166,11 +172,49 @@ impl TestFixture {
 
     pub fn with_create_agent(mut self) -> Self {
         let agent_owner = self.agent_owner.insecure_clone();
-        let result = self.create_agent(
-            &agent_owner,
-            crate::setup::test_data::DEFAULT_AGENT_CONFIG_CID.to_string(),
-        );
+        let result = self.create_agent(&agent_owner, crate::setup::test_data::DEFAULT_AGENT_CONFIG_CID.to_string());
         assert!(result.is_ok(), "Failed to create agent");
+        self
+    }
+
+    pub fn with_validated_agent(mut self, agent_slot_id: u64) -> Self {
+        let result = self.validate_agent(&self.authority.insecure_clone(), agent_slot_id);
+        assert!(result.is_ok(), "Failed to validate agent");
+        self
+    }
+
+    pub fn with_create_goal(mut self) -> Self {
+        let goal_owner = self.create_keypair();
+        let result = self.create_goal(&goal_owner, true);
+        assert!(result.is_ok(), "Failed to create goal");
+        self
+    }
+
+    pub fn with_set_goal(mut self, goal_slot_id: u64, agent_slot_id: u64) -> Self {
+        let goal_owner = self.create_keypair();
+        let result = self.set_goal(
+            &goal_owner,
+            goal_slot_id,
+            crate::setup::test_data::DEFAULT_GOAL_SPECIFICATION_CID.to_string(),
+            10,
+            agent_slot_id,
+            0,
+            DEFAULT_INITIAL_DEPOSIT,
+        );
+        assert!(result.is_ok(), "Failed to set goal");
+        self
+    }
+
+    pub fn with_contribute_to_goal(mut self, goal_slot_id: u64, deposit_amount: u64) -> Self {
+        let contributor = self.contributor.insecure_clone();
+        let result = self.contribute_to_goal(&contributor, goal_slot_id, deposit_amount);
+        assert!(result.is_ok(), "Failed to contribute to goal");
+        self
+    }
+
+    pub fn with_withdraw_from_goal(mut self, goal_slot_id: u64, contributor: &Keypair, shares_to_burn: u64) -> Self {
+        let result = self.withdraw_from_goal(contributor, goal_slot_id, shares_to_burn);
+        assert!(result.is_ok(), "Failed to withdraw from goal");
         self
     }
 }
