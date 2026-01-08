@@ -172,7 +172,10 @@ impl TestFixture {
 
     pub fn with_create_agent(mut self) -> Self {
         let agent_owner = self.agent_owner.insecure_clone();
-        let result = self.create_agent(&agent_owner, crate::setup::test_data::DEFAULT_AGENT_CONFIG_CID.to_string());
+        let result = self.create_agent(
+            &agent_owner,
+            crate::setup::test_data::DEFAULT_AGENT_CONFIG_CID.to_string(),
+        );
         assert!(result.is_ok(), "Failed to create agent");
         self
     }
@@ -212,7 +215,12 @@ impl TestFixture {
         self
     }
 
-    pub fn with_withdraw_from_goal(mut self, goal_slot_id: u64, contributor: &Keypair, shares_to_burn: u64) -> Self {
+    pub fn with_withdraw_from_goal(
+        mut self,
+        goal_slot_id: u64,
+        contributor: &Keypair,
+        shares_to_burn: u64,
+    ) -> Self {
         let result = self.withdraw_from_goal(contributor, goal_slot_id, shares_to_burn);
         assert!(result.is_ok(), "Failed to withdraw from goal");
         self

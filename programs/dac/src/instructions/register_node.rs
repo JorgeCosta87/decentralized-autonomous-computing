@@ -49,10 +49,7 @@ impl<'info> RegisterNode<'info> {
             code_measurement: None,
             tee_signing_pubkey: None,
             node_treasury: self.node_treasury.key(),
-            recent_rewards: Vec::new(),
             total_earned: 0,
-            max_entries_before_transfer: 64,
-            last_transfer_slot: 0,
             total_tasks_completed: 0,
             bump: bumps.node_info,
         });

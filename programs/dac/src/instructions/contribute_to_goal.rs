@@ -1,9 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
-use crate::NetworkConfig;
 use crate::errors::ErrorCode;
 use crate::state::{Contribution, Goal, GoalStatus};
+use crate::NetworkConfig;
 
 #[derive(Accounts)]
 pub struct ContributeToGoal<'info> {
@@ -43,7 +43,11 @@ pub struct ContributeToGoal<'info> {
 }
 
 impl<'info> ContributeToGoal<'info> {
-    pub fn contribute_to_goal(&mut self, deposit_amount: u64, bumps: &ContributeToGoalBumps) -> Result<()> {
+    pub fn contribute_to_goal(
+        &mut self,
+        deposit_amount: u64,
+        bumps: &ContributeToGoalBumps,
+    ) -> Result<()> {
         require!(
             self.goal.status == GoalStatus::Active,
             ErrorCode::InvalidGoalStatus
@@ -75,15 +79,12 @@ impl<'info> ContributeToGoal<'info> {
             from: self.contributor.to_account_info(),
             to: self.vault.to_account_info(),
         };
-        let cpi_context = CpiContext::new(
-            self.system_program.to_account_info(),
-            cpi_accounts,
-        );
+        let cpi_context = CpiContext::new(self.system_program.to_account_info(), cpi_accounts);
         system_program::transfer(cpi_context, deposit_amount)?;
 
         let goal_key = self.goal.key();
         let contributor_key = self.contributor.key();
-        
+
         if self.contribution.goal == Pubkey::default() {
             self.contribution.goal = goal_key;
             self.contribution.contributor = contributor_key;
@@ -91,9 +92,17 @@ impl<'info> ContributeToGoal<'info> {
             self.contribution.refund_amount = 0;
             self.contribution.bump = bumps.contribution;
         } else {
-            require_keys_eq!(self.contribution.goal, goal_key, ErrorCode::InvalidPDAAccount);
-            require_keys_eq!(self.contribution.contributor, contributor_key, ErrorCode::InvalidPDAAccount);
-            
+            require_keys_eq!(
+                self.contribution.goal,
+                goal_key,
+                ErrorCode::InvalidPDAAccount
+            );
+            require_keys_eq!(
+                self.contribution.contributor,
+                contributor_key,
+                ErrorCode::InvalidPDAAccount
+            );
+
             // Add additional shares
             self.contribution.shares = self
                 .contribution

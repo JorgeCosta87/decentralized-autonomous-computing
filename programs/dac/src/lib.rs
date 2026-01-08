@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("GtupmyvcYoz9DXZ1qpYS4FPMtz3EHHHTzyRGWBJYevKQ");
+declare_id!("BaY9vp3RXAQugzAoBojkBEZs9fJKS4dNManN7vwDZSFh");
 
 pub mod errors;
 pub mod instructions;
@@ -75,21 +75,35 @@ pub mod dac {
         max_iterations: u64,
         initial_deposit: u64,
     ) -> Result<()> {
-        ctx.accounts
-            .set_goal(specification_cid, max_iterations, initial_deposit, &ctx.bumps)
+        ctx.accounts.set_goal(
+            specification_cid,
+            max_iterations,
+            initial_deposit,
+            &ctx.bumps,
+        )
     }
 
-    pub fn contribute_to_goal(
-        ctx: Context<ContributeToGoal>,
-        deposit_amount: u64,
-    ) -> Result<()> {
+    pub fn contribute_to_goal(ctx: Context<ContributeToGoal>, deposit_amount: u64) -> Result<()> {
         ctx.accounts.contribute_to_goal(deposit_amount, &ctx.bumps)
     }
 
-    pub fn withdraw_from_goal(
-        ctx: Context<WithdrawFromGoal>,
-        shares_to_burn: u64,
-    ) -> Result<()> {
+    pub fn withdraw_from_goal(ctx: Context<WithdrawFromGoal>, shares_to_burn: u64) -> Result<()> {
         ctx.accounts.withdraw_from_goal(shares_to_burn)
+    }
+
+    pub fn claim_task(ctx: Context<ClaimTask>, max_task_cost: u64) -> Result<()> {
+        ctx.accounts.claim_task(max_task_cost)
+    }
+
+    pub fn submit_task_result(
+        ctx: Context<SubmitTaskResult>,
+        input_cid: String,
+        output_cid: String,
+    ) -> Result<()> {
+        ctx.accounts.submit_task_result(input_cid, output_cid)
+    }
+
+    pub fn submit_task_validation(ctx: Context<SubmitTaskValidation>) -> Result<()> {
+        ctx.accounts.submit_task_validation()
     }
 }

@@ -42,7 +42,7 @@ Existing AI agent systems face several critical challenges:
    - Each goal has an associated vault (SystemAccount PDA)
    - Granular contribution tracking per contributor
    - Contributors can deposit and withdraw at any time before goal completion
-   - Batch reward transfers to reduce transaction costs
+   - Immediate payment to compute nodes upon task validation
    - Proportional refund system based on when funds entered
    - Full refunds available on goal cancellation
    - Vault balance checks before computing phase transition
@@ -60,7 +60,7 @@ Existing AI agent systems face several critical challenges:
    - Event-driven architecture using Solana account subscriptions
    - Off-chain data storage (IPFS) to minimize on-chain state
    - Pre-allocated task slots to avoid repeated account creation
-   - Batch reward transfers to reduce per-task transaction costs
+   - Immediate payment to compute nodes upon task validation
 
 3. **Scalability**
    - Support for multiple validators and compute nodes
@@ -105,7 +105,7 @@ The system follows a modular architecture with three main layers:
 
 5. **Vault-Per-Goal**: Each goal has its own vault SystemAccount PDA for isolated payment management
 
-6. **Batch Reward Transfers**: Rewards accumulate and transfer in batches to reduce transaction costs
+6. **Immediate Payment**: Compute nodes are paid immediately upon task validation
 
 7. **Proportional Refund System**: Contributors only pay for compute that occurred after their contribution, ensuring fair cost distribution
 
@@ -115,7 +115,7 @@ The system follows a modular architecture with three main layers:
 2. **Contribution Phase**: Contributors can deposit or withdraw at any time while goal is Active
 3. **Computing Phase**: Tasks execute while goal remains Active (funds continue to be available for withdrawals)
 4. **Task Execution**: Compute node claims task → executes with LLM → submits result
-5. **Reward Recording**: Validator verifies result → records reward in batch → auto-transfers when threshold reached
+5. **Payment**: Validator verifies result → transfers payment immediately to compute node treasury
 6. **Goal Completion**: Validator detects goal completion in submit_task_validation() → automatically processes refunds → goal returns to Ready (can be reused)
 7. **Refund Phase**: Automatic proportional refunds processed when goal completes or is cancelled, then goal returns to Ready
 
@@ -181,10 +181,7 @@ The NodeInfo PDA stores:
 - `code_measurement`: TEE code measurement (for validator nodes)
 - `tee_signing_pubkey`: TEE signing public key (for validator nodes)
 - `node_treasury`: Node treasury PDA address (SystemAccount for receiving payments)
-- `recent_rewards`: Vector of recent reward entries awaiting batch transfer (max 64)
 - `total_earned`: Cumulative SOL earned by the node
-- `max_entries_before_transfer`: Batch size threshold for auto-transfer (fixed at 64)
-- `last_transfer_slot`: Slot number of last auto-transfer
 - `total_tasks_completed`: Total number of tasks completed by this node
 - `bump`: NodeInfo PDA bump seed
 
@@ -192,7 +189,7 @@ Seeds: `["node_info", node_pubkey]`
 
 #### Node Treasury
 
-The node treasury is a **SystemAccount PDA** (not a data account) that receives batch transfers of rewards.
+The node treasury is a **SystemAccount PDA** (not a data account) that receives payments from goal vaults.
 
 Seeds: `["node_treasury", node_info.key()]`
 
@@ -589,20 +586,9 @@ sequenceDiagram
     DAC->>DAC: Verify TEE signature<br/>Verify validation_proof == SHA256(pending_input_cid + pending_output_cid)<br/>Verify goal.status == Active
     
     alt Validation Approved
-        DAC->>DAC: Update task chain_proof = SHA256(old_chain_proof + input_cid + output_cid + execution_count)<br/>(uses previous validated input_cid/output_cid)<br/>Move pending to validated: input_cid = pending_input_cid, output_cid = pending_output_cid<br/>Clear pending values<br/>Update goal chain_proof = SHA256(old_goal_proof + task_chain_proof + task_id + iteration)<br/>Release lock: goal.locked_for_tasks -= task.max_task_cost<br/>Pay node: vault → node_treasury (payment_amount)<br/>Add RewardEntry to node.recent_rewards<br/>total_tasks_completed++
+        DAC->>DAC: Update task chain_proof = SHA256(old_chain_proof + input_cid + output_cid + execution_count)<br/>(uses previous validated input_cid/output_cid)<br/>Move pending to validated: input_cid = pending_input_cid, output_cid = pending_output_cid<br/>Clear pending values<br/>Update goal chain_proof = SHA256(old_goal_proof + task_chain_proof + task_id + iteration)<br/>Release lock: goal.locked_for_tasks -= task.max_task_cost<br/>Transfer payment: vault → node_treasury (payment_amount)<br/>Update node.total_earned += payment_amount<br/>Increment node.total_tasks_completed<br/>Update goal.current_iteration++
         
         Note over DAC: Share price automatically drops!<br/>Vault decreased by payment_amount
-        
-        alt recent_rewards.len() >= max_entries_before_transfer
-            Note over DAC: Batch threshold reached - auto-transfer
-            DAC->>DAC: Calculate total_amount = sum(recent_rewards)
-            DAC->>DAC: Transfer from vault to node_treasury<br/>node.total_earned += total_amount
-            DAC->>DAC: Clear recent_rewards vector<br/>last_transfer_slot = current_slot
-        else recent_rewards.len() < max_entries_before_transfer
-            Note over DAC: Reward recorded, waiting for more to batch
-        end
-        
-        DAC->>DAC: Update goal progress<br/>current_iteration++
         
         alt Goal Complete (detected by validator)
             DAC->>DAC: Calculate share_price = vault / total_shares<br/>Process automatic refunds<br/>status = Ready<br/>(goal can be reused)
@@ -664,7 +650,7 @@ sequenceDiagram
     end
     
     rect rgb(255, 230, 200)
-        Note over VN,NodeTreasury: PHASE 2: COMPUTING (Batch Rewards)<br/>Note: Withdrawals still allowed<br/>Share price decreases as tasks are paid
+        Note over VN,NodeTreasury: PHASE 2: COMPUTING<br/>Note: Withdrawals still allowed<br/>Share price decreases as tasks are paid
         
         loop For each task
             CN->>CN: Execute task with LLM
@@ -672,16 +658,9 @@ sequenceDiagram
             
             VN->>VN: Validate task in TEE
             VN->>DAC: submit_task_validation(goal_id, task_cid, payment_amount, proof, signature)
-            DAC->>DAC: Verify signature & proof<br/>Release lock: locked_for_tasks -= max_task_cost<br/>Pay node: vault → node_treasury (payment_amount)<br/>Add to node.recent_rewards
+            DAC->>DAC: Verify signature & proof<br/>Release lock: locked_for_tasks -= max_task_cost<br/>Transfer payment: vault → node_treasury (payment_amount)<br/>Update node.total_earned += payment_amount
             
             Note over DAC: Share price automatically drops!<br/>Vault decreased by payment_amount
-            
-            alt Batch threshold reached (e.g., 10 rewards)
-                DAC->>DAC: sum_rewards = sum(recent_rewards)
-                Vault->>NodeTreasury: Transfer sum_rewards
-                DAC->>DAC: node.total_earned += sum_rewards<br/>clear recent_rewards
-                Note over DAC: Batch auto-transferred
-            end
         end
         
         Note over DAC: Goal completion detected automatically<br/>in submit_task_validation()
@@ -761,27 +740,22 @@ When tasks are paid, the vault balance decreases, causing the share price to dro
 **Result:** Alice paid 20 SOL, Bob paid 10 SOL. Perfectly proportional (2:1 ratio) without any complex calculations.
 
 
-### Batch Transfer Mechanism
+### Payment Mechanism
 
-Validators record rewards incrementally, and transfers occur in batches to reduce transaction costs. Here's how it works:
+Compute nodes are paid immediately when their tasks are validated. Here's how it works:
 
 **The Process:**
 
-1. **Task Validation**: When a validator validates a completed task, they record the reward amount. This reward is added to a list of pending rewards for that compute node.
+1. **Task Validation**: When a validator validates a completed task, they determine the payment amount based on the task execution quality and cost.
 
-2. **Reward Accumulation**: Rewards accumulate in the list (up to 64 entries). Each time a task completes, its reward is added to this list instead of being paid immediately.
+2. **Immediate Payment**: The payment amount is transferred immediately from the goal vault to the compute node's treasury account.
 
-3. **Automatic Transfer**: When the list reaches the batch threshold (64 entries, which is also the maximum), the system automatically:
-   - Calculates the total amount of all rewards in the list
-   - Transfers that total amount from the goal vault to the compute node's treasury
-   - Updates the node's total earnings counter
-   - Clears the reward list to start fresh
+3. **Tracking**: The node's `total_earned` counter is updated with the payment amount, and `total_tasks_completed` is incremented.
 
-**Why This Helps:**
-- **Saves Money**: Instead of paying for each task separately (which costs transaction fees), we pay for multiple tasks at once
-- **Flexible**: The batch size can be configured
-- **Accurate**: Every payment is tracked precisely
-- **Transparent**: All batch transfers are tracked in account state for auditing
+**Benefits:**
+- **Immediate Payment**: Compute nodes receive payment as soon as their work is validated
+- **Simple**: No batching or accumulation logic needed
+- **Transparent**: All payments are tracked in account state for auditing
 
 ### Cancel Goal Flow
 
@@ -833,7 +807,7 @@ sequenceDiagram
 
 ### Access Control
 - Agent ownership enforced through Solana account ownership
-- Vault withdrawals only through batch transfers or refunds
+- Vault withdrawals only through payments to compute nodes or refunds
 - Admin actions clearly separated and auditable
 
 ### Payment Security
@@ -851,11 +825,10 @@ sequenceDiagram
 - **Underflow Prevention**: Refund calculations protected with .ok_or(Error::Underflow)
 - **Per-Contributor Isolation**: Each contributor has separate PDA account
 
-#### Batch Transfer Safety
-- **Atomic Operations**: Reward recording and batch transfer occur in single transaction
-- **Vector Bounds**: recent_rewards limited to max_len(64)
-- **Threshold Validation**: max_entries_before_transfer <= 64 enforced
-- **Clear Audit Trail**: All transfers are tracked in account state for full auditability
+#### Payment Safety
+- **Atomic Operations**: Payment transfer occurs in the same transaction as validation
+- **Balance Validation**: All transfers check sufficient vault balance before execution
+- **Clear Audit Trail**: All payments are tracked in account state for full auditability
 
 #### State Transition Guards
 - **Status Checks**: All operations verify correct goal status
@@ -870,7 +843,7 @@ sequenceDiagram
 - **Fund Locking**: Tasks lock funds on claim (`goal.locked_for_tasks`), preventing withdrawal until validation completes
 - **Node Treasury**: PDA-derived from node_info, prevents payment hijacking
 - **Refunds**: Automatic on goal completion/cancellation, divided equally among active contributors
-- **Batch Transfers**: Rewards batched (max 64 entries), with checked arithmetic to prevent overflow
+- **Immediate Payments**: Payments transferred immediately upon validation, with checked arithmetic to prevent overflow
 
 #### Cryptographic Signatures
 - **TEE-Generated Keys**: All validator operations signed using Ed25519 keypairs generated in TEE

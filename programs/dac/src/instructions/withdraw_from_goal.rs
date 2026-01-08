@@ -1,9 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
-use crate::NetworkConfig;
 use crate::errors::ErrorCode;
 use crate::state::{Contribution, Goal, GoalStatus};
+use crate::NetworkConfig;
 
 #[derive(Accounts)]
 pub struct WithdrawFromGoal<'info> {
@@ -75,11 +75,7 @@ impl<'info> WithdrawFromGoal<'info> {
         );
 
         let goal_key = self.goal.key();
-        let vault_seeds = &[
-            b"goal_vault",
-            goal_key.as_ref(),
-            &[self.goal.vault_bump],
-        ];
+        let vault_seeds = &[b"goal_vault", goal_key.as_ref(), &[self.goal.vault_bump]];
         let vault_signer = &[&vault_seeds[..]];
 
         let cpi_accounts = system_program::Transfer {
