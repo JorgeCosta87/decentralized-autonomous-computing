@@ -61,6 +61,10 @@ pub mod dac {
         ctx.accounts.create_agent(agent_config_cid, &ctx.bumps)
     }
 
+    pub fn validate_agent(ctx: Context<ValidateAgent>) -> Result<()> {
+        ctx.accounts.validate_agent()
+    }
+
     pub fn create_goal(ctx: Context<CreateGoal>, is_public: bool) -> Result<()> {
         ctx.accounts.create_goal(is_public, &ctx.bumps)
     }
