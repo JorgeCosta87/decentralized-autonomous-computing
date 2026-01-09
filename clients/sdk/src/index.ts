@@ -1,9 +1,7 @@
 // Main SDK exports
-export { DacFrontendClient } from './dacFrontendClient.js';
-export { IPFSClient } from './ipfsClient.js';
+export { DacFrontendClient } from './dacClient.js';
 
 // Types
-export type { IPFSClientConfig } from './ipfsClient.js';
 export type {
   NetworkConfig,
   Agent,
