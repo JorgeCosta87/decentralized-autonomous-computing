@@ -92,7 +92,7 @@ impl TestFixture {
     }
 
     pub fn with_initialize_network(mut self) -> Self {
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
 
         let remaining_accounts = self.create_remaining_accounts_for_initialize(
             &network_config_pda,

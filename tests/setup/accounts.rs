@@ -4,8 +4,8 @@ use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey};
 use crate::setup::TestFixture;
 
 pub trait Accounts {
-    fn find_network_config_pda(&self, authority: &Pubkey) -> (Pubkey, u8);
-    fn get_network_config(&self, authority: &Pubkey) -> NetworkConfig;
+    fn find_network_config_pda(&self) -> (Pubkey, u8);
+    fn get_network_config(&self) -> NetworkConfig;
     fn find_goal_pda(&self, network_config: &Pubkey, goal_id: u64) -> (Pubkey, u8);
     fn find_task_pda(&self, network_config: &Pubkey, task_id: u64) -> (Pubkey, u8);
     fn create_goal_pdas(&self, network_config: &Pubkey, count: u64) -> Vec<AccountMeta>;
@@ -29,16 +29,16 @@ pub trait Accounts {
 }
 
 impl Accounts for TestFixture {
-    fn find_network_config_pda(&self, authority: &Pubkey) -> (Pubkey, u8) {
+    fn find_network_config_pda(&self) -> (Pubkey, u8) {
         let (pda, bump) = Pubkey::find_program_address(
-            &[b"dac_network_config", authority.as_ref()],
+            &[b"dac_network_config"],
             &self.program_id,
         );
         (pda, bump)
     }
 
-    fn get_network_config(&self, authority: &Pubkey) -> NetworkConfig {
-        let addr = self.find_network_config_pda(authority).0;
+    fn get_network_config(&self) -> NetworkConfig {
+        let addr = self.find_network_config_pda().0;
 
         let account = self
             .svm

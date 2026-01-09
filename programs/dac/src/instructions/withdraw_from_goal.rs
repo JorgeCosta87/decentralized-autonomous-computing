@@ -32,7 +32,7 @@ pub struct WithdrawFromGoal<'info> {
     pub contribution: Account<'info, Contribution>,
 
     #[account(
-        seeds = [b"dac_network_config", network_config.authority.key().as_ref()],
+        seeds = [b"dac_network_config"],
         bump = network_config.bump,
     )]
     pub network_config: Account<'info, NetworkConfig>,

@@ -1,0 +1,9 @@
+{
+    "rust-analyzer.linkedProjects": [
+      "Cargo.toml",
+      "agent-network/Cargo.toml"
+    ],
+    "rust-analyzer.cargo.buildScripts.enable": true,
+    "rust-analyzer.checkOnSave.enable": true
+  }
+  

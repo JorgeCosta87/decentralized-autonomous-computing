@@ -1,3 +1,4 @@
+use anchor_lang::Key;
 use dac_client::instructions::{
     ClaimComputeNodeBuilder, ClaimTaskBuilder, ClaimValidatorNodeBuilder, ContributeToGoalBuilder,
     CreateAgentBuilder, CreateGoalBuilder, InitializeNetworkBuilder, RegisterNodeBuilder,
@@ -153,7 +154,7 @@ impl Instructions for TestFixture {
         node_type: NodeType,
     ) -> TransactionResult {
         let owner_pubkey = owner.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (node_info_pda, _) = self.find_node_info_pda(node_pubkey);
         let (node_treasury_pda, _) = self.find_node_treasury_pda(&node_info_pda);
 
@@ -179,7 +180,7 @@ impl Instructions for TestFixture {
         node_info_cid: String,
     ) -> TransactionResult {
         let compute_node_pubkey = compute_node.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (node_info_pda, _) = self.find_node_info_pda(&compute_node_pubkey);
 
         let mut builder = ClaimComputeNodeBuilder::new();
@@ -203,7 +204,7 @@ impl Instructions for TestFixture {
         tee_signing_pubkey: Pubkey,
     ) -> TransactionResult {
         let validator_node_pubkey = validator_node.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (node_info_pda, _) = self.find_node_info_pda(&validator_node_pubkey);
 
         let mut builder = ClaimValidatorNodeBuilder::new();
@@ -228,7 +229,7 @@ impl Instructions for TestFixture {
         ed25519_ix: &Instruction,
     ) -> TransactionResult {
         let validator_node_pubkey = validator_node.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (validator_node_info_pda, _) = self.find_node_info_pda(&validator_node_pubkey);
         let (compute_node_info_pda, _) = self.find_node_info_pda(compute_node_pubkey);
 
@@ -251,7 +252,7 @@ impl Instructions for TestFixture {
 
     fn validate_agent(&mut self, validator: &Keypair, agent_slot_id: u64) -> TransactionResult {
         let validator_pubkey = validator.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (agent_pda, _) = self.find_agent_pda(&network_config_pda, agent_slot_id);
 
         let mut builder = ValidateAgentBuilder::new();
@@ -270,8 +271,8 @@ impl Instructions for TestFixture {
         agent_config_cid: String,
     ) -> TransactionResult {
         let agent_owner_pubkey = agent_owner.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
-        let network_config = self.get_network_config(&self.authority.pubkey());
+        let network_config_pda = self.find_network_config_pda().0;
+        let network_config = self.get_network_config();
         let agent_slot_id = network_config.agent_count;
         let (agent_pda, _) = self.find_agent_pda(&network_config_pda, agent_slot_id);
 
@@ -291,8 +292,8 @@ impl Instructions for TestFixture {
 
     fn create_goal(&mut self, owner: &Keypair, is_public: bool) -> TransactionResult {
         let owner_pubkey = owner.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
-        let network_config = self.get_network_config(&self.authority.pubkey());
+        let network_config_pda = self.find_network_config_pda().0;
+        let network_config = self.get_network_config();
         let goal_slot_id = network_config.goal_count;
         let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
 
@@ -319,7 +320,7 @@ impl Instructions for TestFixture {
         initial_deposit: u64,
     ) -> TransactionResult {
         let goal_owner_pubkey = goal_owner.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
         let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
         let (owner_contribution_pda, _) = self.find_contribution_pda(&goal_pda, &goal_owner_pubkey);
@@ -350,7 +351,7 @@ impl Instructions for TestFixture {
         deposit_amount: u64,
     ) -> TransactionResult {
         let contributor_pubkey = contributor.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
         let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
         let (contribution_pda, _) = self.find_contribution_pda(&goal_pda, &contributor_pubkey);
@@ -378,7 +379,7 @@ impl Instructions for TestFixture {
         shares_to_burn: u64,
     ) -> TransactionResult {
         let contributor_pubkey = contributor.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
         let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
         let (contribution_pda, _) = self.find_contribution_pda(&goal_pda, &contributor_pubkey);
@@ -407,7 +408,7 @@ impl Instructions for TestFixture {
         max_task_cost: u64,
     ) -> TransactionResult {
         let compute_node_pubkey = compute_node.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
         let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
@@ -438,7 +439,7 @@ impl Instructions for TestFixture {
         output_cid: String,
     ) -> TransactionResult {
         let compute_node_pubkey = compute_node.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
 
         let mut builder = SubmitTaskResultBuilder::new();
@@ -465,7 +466,7 @@ impl Instructions for TestFixture {
         ed25519_ix: &Instruction,
     ) -> TransactionResult {
         let validator_pubkey = validator.pubkey();
-        let network_config_pda = self.find_network_config_pda(&self.authority.pubkey()).0;
+        let network_config_pda = self.find_network_config_pda().0;
         let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
         let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);

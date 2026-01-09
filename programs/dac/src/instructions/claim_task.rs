@@ -1,9 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::ErrorCode;
-use crate::state::{
-    Goal, GoalStatus, NetworkConfig, NodeInfo, NodeStatus, NodeType, Task, TaskStatus,
-};
+use crate::state::{Goal, GoalStatus, NetworkConfig, NodeInfo, NodeStatus, NodeType, Task, TaskStatus};
 
 #[derive(Accounts)]
 pub struct ClaimTask<'info> {
@@ -38,7 +36,7 @@ pub struct ClaimTask<'info> {
     pub compute_node_info: Account<'info, NodeInfo>,
 
     #[account(
-        seeds = [b"dac_network_config", network_config.authority.key().as_ref()],
+        seeds = [b"dac_network_config"],
         bump = network_config.bump,
     )]
     pub network_config: Account<'info, NetworkConfig>,
@@ -63,9 +61,11 @@ impl<'info> ClaimTask<'info> {
             ErrorCode::InvalidNodeType
         );
         require!(max_task_cost > 0, ErrorCode::Overflow);
-        require!(self.goal.total_shares > 0, ErrorCode::Overflow);
+        require!(
+            self.goal.total_shares > 0,
+            ErrorCode::Overflow
+        );
 
-        // Check available balance (vault - locked - rent)
         let rent = Rent::get()?;
         let rent_exempt_minimum = rent.minimum_balance(0);
         let available_balance = self
@@ -81,14 +81,12 @@ impl<'info> ClaimTask<'info> {
             ErrorCode::InsufficientBalance
         );
 
-        // Lock maximum cost
         self.goal.locked_for_tasks = self
             .goal
             .locked_for_tasks
             .checked_add(max_task_cost)
             .ok_or(ErrorCode::Overflow)?;
 
-        // Update task
         self.task.compute_node = Some(self.compute_node.key());
         self.task.max_task_cost = max_task_cost;
         self.task.status = TaskStatus::Processing;

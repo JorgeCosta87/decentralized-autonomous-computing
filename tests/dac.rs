@@ -16,14 +16,13 @@ mod setup;
 #[test]
 fn test_initialize_network_without_remaining_accounts() {
     let mut fixt = TestFixture::new();
-    let authority = fixt.authority.insecure_clone();
-    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+    let network_config_pda = fixt.find_network_config_pda().0;
 
     let allocate_goals = 0;
     let allocate_tasks = 0;
 
     let result = fixt.initialize_network(
-        &authority,
+        &fixt.authority.insecure_clone(),
         &network_config_pda,
         DEFAULT_CID_CONFIG.to_string(),
         allocate_goals,
@@ -35,9 +34,9 @@ fn test_initialize_network_without_remaining_accounts() {
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let network_config = fixt.get_network_config(&authority.pubkey());
+            let network_config = fixt.get_network_config();
 
-            assert_eq!(network_config.authority, authority.pubkey());
+            assert_eq!(network_config.authority, fixt.authority.pubkey());
             assert_eq!(network_config.cid_config, DEFAULT_CID_CONFIG.to_string());
             assert_eq!(network_config.genesis_hash, compute_genesis_hash());
             assert_eq!(network_config.agent_count, 0);
@@ -55,8 +54,7 @@ fn test_initialize_network_without_remaining_accounts() {
 #[test]
 fn test_initialize_network_with_remaining_accounts() {
     let mut fixt = TestFixture::new();
-    let authority = fixt.authority.insecure_clone();
-    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+    let network_config_pda = fixt.find_network_config_pda().0;
 
     let allocate_goals = 2;
     let allocate_tasks = 20;
@@ -67,7 +65,7 @@ fn test_initialize_network_with_remaining_accounts() {
     );
 
     let result = fixt.initialize_network(
-        &authority,
+        &fixt.authority.insecure_clone(),
         &network_config_pda,
         DEFAULT_CID_CONFIG.to_string(),
         allocate_goals,
@@ -79,9 +77,8 @@ fn test_initialize_network_with_remaining_accounts() {
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let network_config = fixt.get_network_config(&authority.pubkey());
+            let network_config = fixt.get_network_config();
 
-            assert_eq!(network_config.authority, authority.pubkey());
             assert_eq!(network_config.cid_config, DEFAULT_CID_CONFIG.to_string());
             assert_eq!(network_config.genesis_hash, compute_genesis_hash());
             assert_eq!(network_config.agent_count, 0);
@@ -100,7 +97,6 @@ fn test_initialize_network_with_remaining_accounts() {
 fn test_register_compute_node() {
     let mut fixt = TestFixture::new().with_initialize_network();
 
-    let authority = fixt.authority.insecure_clone();
     let compute_node_pubkey = fixt.compute_node.pubkey();
 
     let result = fixt.register_node(
@@ -113,7 +109,7 @@ fn test_register_compute_node() {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
             let node_info = fixt.get_node_info(&compute_node_pubkey);
-            let network_config = fixt.get_network_config(&authority.pubkey());
+            let network_config = fixt.get_network_config();
 
             assert_eq!(node_info.owner, fixt.compute_node_owner.pubkey());
             assert_eq!(node_info.node_pubkey, compute_node_pubkey);
@@ -130,7 +126,6 @@ fn test_register_compute_node() {
 fn test_register_validator_node() {
     let mut fixt = TestFixture::new().with_initialize_network();
 
-    let authority = fixt.authority.insecure_clone();
     let validator_node_pubkey = fixt.validator_node.pubkey();
 
     let result = fixt.register_node(
@@ -143,7 +138,7 @@ fn test_register_validator_node() {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
             let node_info = fixt.get_node_info(&validator_node_pubkey);
-            let network_config = fixt.get_network_config(&authority.pubkey());
+            let network_config = fixt.get_network_config();
 
             assert_eq!(node_info.owner, fixt.validator_node_owner.pubkey());
             assert_eq!(node_info.node_pubkey, validator_node_pubkey);
@@ -170,7 +165,7 @@ fn test_claim_compute_node() {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
             let node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
-            let network_config = fixt.get_network_config(&fixt.authority.pubkey());
+            let network_config = fixt.get_network_config();
 
             assert_eq!(node_info.status, NodeStatus::AwaitingValidation);
             assert_eq!(
@@ -198,7 +193,7 @@ fn test_claim_validator_node() {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
             let node_info = fixt.get_node_info(&fixt.validator_node.pubkey());
-            let network_config = fixt.get_network_config(&fixt.authority.pubkey());
+            let network_config = fixt.get_network_config();
 
             assert_eq!(node_info.status, NodeStatus::Active);
             assert_eq!(node_info.code_measurement, Some(DEFAULT_CODE_MEASUREMENT));
@@ -236,7 +231,7 @@ fn test_validate_compute_node() {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
             let node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
-            let network_config = fixt.get_network_config(&fixt.authority.pubkey());
+            let network_config = fixt.get_network_config();
 
             assert_eq!(node_info.status, NodeStatus::Active);
             assert_eq!(node_info.total_tasks_completed, 0);
@@ -364,16 +359,15 @@ fn test_inactive_validator() {
 fn test_create_agent() {
     let mut fixt = TestFixture::new().with_initialize_network();
 
-    let authority = fixt.authority.insecure_clone();
     let agent_owner = fixt.agent_owner.insecure_clone();
-    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+    let network_config_pda = fixt.find_network_config_pda().0;
 
     let result = fixt.create_agent(&agent_owner, DEFAULT_AGENT_CONFIG_CID.to_string());
 
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let network_config = fixt.get_network_config(&authority.pubkey());
+            let network_config = fixt.get_network_config();
             let agent = fixt.get_agent(&network_config_pda, 0);
 
             assert_eq!(agent.agent_slot_id, 0);
@@ -391,9 +385,8 @@ fn test_create_agent() {
 fn test_create_multiple_agents() {
     let mut fixt = TestFixture::new().with_initialize_network();
 
-    let authority = fixt.authority.insecure_clone();
     let agent_owner = fixt.agent_owner.insecure_clone();
-    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+    let network_config_pda = fixt.find_network_config_pda().0;
 
     let result1 = fixt.create_agent(&agent_owner, DEFAULT_AGENT_CONFIG_CID.to_string());
     assert!(result1.is_ok(), "Failed to create first agent");
@@ -401,7 +394,7 @@ fn test_create_multiple_agents() {
     let result2 = fixt.create_agent(&agent_owner, "QmSecondAgentConfigCID".to_string());
     assert!(result2.is_ok(), "Failed to create second agent");
 
-    let network_config = fixt.get_network_config(&authority.pubkey());
+    let network_config = fixt.get_network_config();
     assert_eq!(network_config.agent_count, 2);
 
     let agent0 = fixt.get_agent(&network_config_pda, 0);
@@ -426,9 +419,8 @@ fn test_set_goal() {
         .with_create_agent()
         .with_validated_agent(0);
 
-    let authority = fixt.authority.insecure_clone();
     let goal_owner = fixt.create_keypair();
-    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+    let network_config_pda = fixt.find_network_config_pda().0;
     // Set goal
     let result2 = fixt.set_goal(
         &goal_owner,
@@ -485,9 +477,8 @@ fn test_contribute_to_goal() {
         .with_create_agent()
         .with_validated_agent(0);
 
-    let authority = fixt.authority.insecure_clone();
     let contributor = fixt.create_keypair();
-    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+    let network_config_pda = fixt.find_network_config_pda().0;
 
     let mut fixt = fixt.with_set_goal(0, 0);
 
@@ -521,11 +512,10 @@ fn test_contribute_to_goal_multiple_contributors() {
         .with_create_agent()
         .with_validated_agent(0);
 
-    let authority = fixt.authority.insecure_clone();
     let goal_owner = fixt.create_keypair();
     let contributor1 = fixt.create_keypair();
     let contributor2 = fixt.create_keypair();
-    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+    let network_config_pda = fixt.find_network_config_pda().0;
 
     let result = fixt.set_goal(
         &goal_owner,
@@ -580,9 +570,8 @@ fn test_withdraw_from_goal() {
         .with_set_goal(0, 0)
         .with_contribute_to_goal(0, DEFAULT_CONTRIBUTION_AMOUNT);
 
-    let authority = fixt.authority.insecure_clone();
     let contributor = fixt.contributor.insecure_clone();
-    let network_config_pda = fixt.find_network_config_pda(&authority.pubkey()).0;
+    let network_config_pda = fixt.find_network_config_pda().0;
 
     let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
     let contribution_before = fixt.get_contribution(&goal_pda, &contributor.pubkey());
@@ -644,7 +633,7 @@ fn test_claim_task() {
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let network_config_pda = fixt.find_network_config_pda(&fixt.authority.pubkey()).0;
+            let network_config_pda = fixt.find_network_config_pda().0;
             let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
             let task = fixt.get_task(&network_config_pda, task_slot_id);
 
@@ -697,7 +686,7 @@ fn test_submit_task_result() {
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let network_config_pda = fixt.find_network_config_pda(&fixt.authority.pubkey()).0;
+            let network_config_pda = fixt.find_network_config_pda().0;
             let task = fixt.get_task(&network_config_pda, task_slot_id);
 
             assert_eq!(task.status, TaskStatus::AwaitingValidation);
@@ -775,7 +764,7 @@ fn test_submit_task_validation_approved() {
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let network_config_pda = fixt.find_network_config_pda(&fixt.authority.pubkey()).0;
+            let network_config_pda = fixt.find_network_config_pda().0;
             let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
             let task = fixt.get_task(&network_config_pda, task_slot_id);
             let compute_node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
