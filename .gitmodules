@@ -1,3 +1,6 @@
-[submodule "nodes/agent-compute-node"]
-	path = nodes/compute-node
+[submodule "agent-compute-node"]
+	path = agent-compute-node
 	url = https://github.com/JorgeCosta87/agent-compute-node.git
+[submodule "agent-network"]
+	path = agent-network
+	url = https://github.com/JorgeCosta87/agent-network.git
