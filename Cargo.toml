@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "programs/*"
+    "programs/*",
+    "clients/rust",
 ]
 resolver = "2"
 
@@ -25,7 +26,6 @@ edition = "2021"
 [[test]]
 name = "dac"
 path = "tests/dac.rs"
-
 
 [dev-dependencies]
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
