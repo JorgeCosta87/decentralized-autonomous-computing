@@ -14,6 +14,7 @@ import {
   deriveTaskAddress,
   deriveGoalVaultAddress,
   deriveContributionAddress,
+  deriveNodeInfoAddress,
 } from './dacPdas.js';
 import {
   getInitializeNetworkInstruction,
@@ -37,10 +38,12 @@ import {
   fetchMaybeAgent,
   fetchMaybeGoal,
   fetchMaybeContribution,
+  fetchMaybeNodeInfo,
   type NetworkConfig,
   type Agent,
   type Goal,
   type Contribution,
+  type NodeInfo,
 } from './generated/dac/accounts/index.js';
 import type { CodeMeasurementArgs } from './generated/dac/types/index.js';
 
@@ -72,8 +75,8 @@ export class DacFrontendClient {
     private readonly programAddress: Address = DAC_PROGRAM_ID
   ) {}
 
-  async getNetworkConfig(authority: Address): Promise<NetworkConfig | null> {
-    const networkConfigAddress = await deriveNetworkConfigAddress(this.programAddress, authority);
+  async getNetworkConfig(): Promise<NetworkConfig | null> {
+    const networkConfigAddress = await deriveNetworkConfigAddress(this.programAddress);
     const account = await fetchMaybeNetworkConfig(this.client.rpc, networkConfigAddress);
     return account.exists ? account.data : null;
   }
@@ -96,6 +99,12 @@ export class DacFrontendClient {
     return account.exists ? account.data : null;
   }
 
+  async getNodeInfo(nodePubkey: Address): Promise<NodeInfo | null> {
+    const nodeInfoAddress = await deriveNodeInfoAddress(this.programAddress, nodePubkey);
+    const account = await fetchMaybeNodeInfo(this.client.rpc, nodeInfoAddress);
+    return account.exists ? account.data : null;
+  }
+
   async initializeNetwork(params: {
     authority: TransactionSigner;
     cidConfig: string;
@@ -104,8 +113,7 @@ export class DacFrontendClient {
     approvedCodeMeasurements: CodeMeasurementArgs[];
   }): Promise<{ signature: string; networkConfigAddress: Address }> {
     const networkConfigAddress = await deriveNetworkConfigAddress(
-      this.programAddress,
-      params.authority.address
+      this.programAddress
     );
 
     const remainingAccounts: Address[] = [];
@@ -182,7 +190,7 @@ export class DacFrontendClient {
     networkConfig: Address;
     agentConfigCid: string;
   }): Promise<{ signature: string; agentAddress: Address; agentSlotId: bigint }> {
-    const networkConfigData = await this.getNetworkConfig(params.networkConfig);
+    const networkConfigData = await this.getNetworkConfig();
     if (!networkConfigData) {
       throw new Error('Network config not found');
     }
@@ -216,7 +224,7 @@ export class DacFrontendClient {
     networkConfig: Address;
     isPublic: boolean;
   }): Promise<{ signature: string; goalAddress: Address; goalSlotId: bigint }> {
-    const networkConfigData = await this.getNetworkConfig(params.networkConfig);
+    const networkConfigData = await this.getNetworkConfig();
     if (!networkConfigData) {
       throw new Error('Network config not found');
     }

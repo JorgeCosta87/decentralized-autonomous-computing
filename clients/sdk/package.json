@@ -8,7 +8,9 @@
     "fmt:check": "prettier --check .",
     "lint": "eslint .",
     "start": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "generate-keypairs": "tsx scripts/generate-test-keypairs.ts",
+    "test:run": "tsx src/test.ts"
   },
   "displayName": "Node Server",
   "description": "Node.js script with gill (based on @solana/kit)",
