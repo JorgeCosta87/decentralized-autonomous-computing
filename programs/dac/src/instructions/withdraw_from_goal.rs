@@ -52,9 +52,7 @@ impl<'info> WithdrawFromGoal<'info> {
             ErrorCode::Underflow
         );
 
-        // Calculate share price
         // Exclude rent lamports from share price calculation
-        // Rent is needed for account existence but not part of user deposits
         let rent = Rent::get()?;
         let rent_exempt_minimum = rent.minimum_balance(0);
         let available_balance = self
@@ -66,7 +64,6 @@ impl<'info> WithdrawFromGoal<'info> {
             .ok_or(ErrorCode::Underflow)?;
         let share_price = (available_balance as f64) / (self.goal.total_shares as f64);
 
-        // Calculate withdraw amount
         let withdraw_amount = (shares_to_burn as f64 * share_price) as u64;
         // available_balance already excludes rent and locked_for_tasks
         require!(

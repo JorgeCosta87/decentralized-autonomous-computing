@@ -31,8 +31,14 @@ pub struct Task {
     pub pending_input_cid: Option<String>,
     #[max_len(128)]
     pub pending_output_cid: Option<String>,
+    #[max_len(128)]
+    pub next_input_cid: Option<String>,
     pub chain_proof: [u8; 32],
     pub execution_count: u64,
     pub max_task_cost: u64,
+    #[max_len(10)]
+    pub approved_validators: Vec<Pubkey>,
+    #[max_len(10)]
+    pub rejected_validators: Vec<Pubkey>,
     pub bump: u8,
 }

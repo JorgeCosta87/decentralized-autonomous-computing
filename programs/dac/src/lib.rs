@@ -9,6 +9,7 @@ pub mod utils;
 
 pub use instructions::*;
 pub use state::*;
+pub use utils::*;
 
 #[program]
 pub mod dac {
@@ -20,12 +21,14 @@ pub mod dac {
         allocate_goals: u64,
         allocate_tasks: u64,
         approved_code_measurements: Vec<CodeMeasurement>,
+        required_validations: u32,
     ) -> Result<()> {
         ctx.accounts.initialize_network(
             cid_config,
             allocate_goals,
             allocate_tasks,
             approved_code_measurements,
+            required_validations,
             &ctx.remaining_accounts,
             &ctx.bumps,
         )
@@ -36,7 +39,8 @@ pub mod dac {
         cid_config: Option<String>,
         new_code_measurement: Option<CodeMeasurement>,
     ) -> Result<()> {
-        ctx.accounts.update_network_config(cid_config, new_code_measurement)
+        ctx.accounts
+            .update_network_config(cid_config, new_code_measurement)
     }
 
     pub fn register_node(
@@ -48,21 +52,23 @@ pub mod dac {
             .register_node(node_pubkey, node_type, &ctx.bumps)
     }
 
-    pub fn claim_compute_node(ctx: Context<ClaimComputeNode>, node_info_cid: String) -> Result<()> {
-        ctx.accounts.claim_compute_node(node_info_cid)
+    pub fn claim_public_node(ctx: Context<ClaimPublicNode>, node_info_cid: String) -> Result<()> {
+        ctx.accounts.claim_public_node(node_info_cid)
     }
 
-    pub fn claim_validator_node<'info>(
-        ctx: Context<ClaimValidatorNode>,
+    pub fn claim_confidential_node<'info>(
+        ctx: Context<ClaimConfidentialNode>,
         code_measurement: [u8; 32],
         tee_signing_pubkey: Pubkey,
     ) -> Result<()> {
         ctx.accounts
-            .claim_validator_node(code_measurement, tee_signing_pubkey)
+            .claim_confidential_node(code_measurement, tee_signing_pubkey)
     }
 
-    pub fn validate_compute_node(ctx: Context<ValidateComputeNode>) -> Result<()> {
-        ctx.accounts.validate_compute_node()
+    // Note: validate_public_node handles only validation of public nodes (Public type)
+    // The tee confidential nodes get approved by itself.
+    pub fn validate_public_node(ctx: Context<ValidatePublicNode>, approved: bool) -> Result<()> {
+        ctx.accounts.validate_public_node(approved)
     }
 
     pub fn create_agent(ctx: Context<CreateAgent>, agent_config_cid: String) -> Result<()> {
@@ -73,8 +79,13 @@ pub mod dac {
         ctx.accounts.validate_agent()
     }
 
-    pub fn create_goal(ctx: Context<CreateGoal>, is_public: bool) -> Result<()> {
-        ctx.accounts.create_goal(is_public, &ctx.bumps)
+    pub fn create_goal(
+        ctx: Context<CreateGoal>,
+        is_owned: bool,
+        is_confidential: bool,
+    ) -> Result<()> {
+        ctx.accounts
+            .create_goal(is_owned, is_confidential, &ctx.bumps)
     }
 
     pub fn set_goal(
@@ -107,12 +118,25 @@ pub mod dac {
         ctx: Context<SubmitTaskResult>,
         input_cid: String,
         output_cid: String,
+        next_input_cid: String,
     ) -> Result<()> {
-        ctx.accounts.submit_task_result(input_cid, output_cid)
+        ctx.accounts
+            .submit_task_result(input_cid, output_cid, next_input_cid)
     }
 
-    pub fn submit_task_validation(ctx: Context<SubmitTaskValidation>) -> Result<()> {
-        ctx.accounts.submit_task_validation()
+    // Note: submit_confidential_task_validation handles TEE-based validation (requires Ed25519 instruction)
+    pub fn submit_confidential_task_validation(ctx: Context<SubmitTaskValidation>) -> Result<()> {
+        ctx.accounts.submit_confidential_task_validation()
     }
 
+    // Note: submit_public_task_validation handles common validation (validators provide parameters directly)
+    pub fn submit_public_task_validation(
+        ctx: Context<SubmitTaskValidation>,
+        payment_amount: u64,
+        approved: bool,
+        goal_completed: bool,
+    ) -> Result<()> {
+        ctx.accounts
+            .submit_public_task_validation(payment_amount, approved, goal_completed)
+    }
 }

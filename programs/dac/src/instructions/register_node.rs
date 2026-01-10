@@ -51,6 +51,8 @@ impl<'info> RegisterNode<'info> {
             node_treasury: self.node_treasury.key(),
             total_earned: 0,
             total_tasks_completed: 0,
+            approved_validators: Vec::new(),
+            rejected_validators: Vec::new(),
             bump: bumps.node_info,
         });
 

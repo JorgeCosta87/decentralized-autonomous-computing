@@ -1,12 +1,12 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::ErrorCode;
-use crate::state::{NetworkConfig, NodeInfo, NodeStatus, NodeType};
+use crate::state::{NetworkConfig, NodeInfo, NodeStatus};
 
 #[derive(Accounts)]
-pub struct ClaimComputeNode<'info> {
+pub struct ClaimPublicNode<'info> {
     #[account(mut)]
-    pub compute_node: Signer<'info>,
+    pub node: Signer<'info>,
 
     #[account(
         seeds = [b"dac_network_config", network_config.authority.as_ref()],
@@ -16,18 +16,14 @@ pub struct ClaimComputeNode<'info> {
 
     #[account(
         mut,
-        seeds = [b"node_info", compute_node.key().as_ref()],
+        seeds = [b"node_info", node.key().as_ref()],
         bump = node_info.bump,
     )]
     pub node_info: Account<'info, NodeInfo>,
 }
 
-impl<'info> ClaimComputeNode<'info> {
-    pub fn claim_compute_node(&mut self, node_info_cid: String) -> Result<()> {
-        require!(
-            self.node_info.node_type == NodeType::Compute,
-            ErrorCode::InvalidNodeType
-        );
+impl<'info> ClaimPublicNode<'info> {
+    pub fn claim_public_node(&mut self, node_info_cid: String) -> Result<()> {
         require!(
             self.node_info.status == NodeStatus::PendingClaim,
             ErrorCode::InvalidNodeStatus

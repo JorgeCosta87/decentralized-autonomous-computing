@@ -1,7 +1,9 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::ErrorCode;
-use crate::state::{Goal, GoalStatus, NetworkConfig, NodeInfo, NodeStatus, NodeType, Task, TaskStatus};
+use crate::state::{
+    Goal, GoalStatus, NetworkConfig, NodeInfo, NodeStatus, NodeType, Task, TaskStatus,
+};
 
 #[derive(Accounts)]
 pub struct ClaimTask<'info> {
@@ -56,15 +58,14 @@ impl<'info> ClaimTask<'info> {
             self.compute_node_info.status == NodeStatus::Active,
             ErrorCode::InvalidNodeStatus
         );
-        require!(
-            self.compute_node_info.node_type == NodeType::Compute,
-            ErrorCode::InvalidNodeType
-        );
+        if self.goal.is_confidential {
+            require!(
+                self.compute_node_info.node_type == NodeType::Confidential,
+                ErrorCode::InvalidNodeType
+            );
+        }
         require!(max_task_cost > 0, ErrorCode::Overflow);
-        require!(
-            self.goal.total_shares > 0,
-            ErrorCode::Overflow
-        );
+        require!(self.goal.total_shares > 0, ErrorCode::Overflow);
 
         let rent = Rent::get()?;
         let rent_exempt_minimum = rent.minimum_balance(0);
@@ -95,6 +96,10 @@ impl<'info> ClaimTask<'info> {
             .execution_count
             .checked_add(1)
             .ok_or(ErrorCode::Overflow)?;
+
+        // Reset task validation tracking for new execution
+        self.task.approved_validators.clear();
+        self.task.rejected_validators.clear();
 
         Ok(())
     }

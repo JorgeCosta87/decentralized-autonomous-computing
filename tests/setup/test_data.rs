@@ -35,3 +35,6 @@ pub const DEFAULT_AGENT_CONFIG_CID: &str = "QmAgentConfigCID";
 pub const DEFAULT_GOAL_SPECIFICATION_CID: &str = "QmGoalSpecificationCID";
 pub const DEFAULT_INITIAL_DEPOSIT: u64 = 1_000_000_000; // 1 SOL
 pub const DEFAULT_CONTRIBUTION_AMOUNT: u64 = 500_000_000; // 0.5 SOL
+
+// Network config test data
+pub const DEFAULT_REQUIRED_VALIDATIONS: u32 = 1; // For testing, use 1 validation

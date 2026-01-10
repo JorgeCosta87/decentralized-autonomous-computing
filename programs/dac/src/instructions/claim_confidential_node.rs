@@ -4,9 +4,9 @@ use crate::errors::ErrorCode;
 use crate::state::{NetworkConfig, NodeInfo, NodeStatus, NodeType};
 
 #[derive(Accounts)]
-pub struct ClaimValidatorNode<'info> {
+pub struct ClaimConfidentialNode<'info> {
     #[account(mut)]
-    pub validator_node: Signer<'info>,
+    pub confidential_node: Signer<'info>,
 
     #[account(
         mut,
@@ -17,20 +17,20 @@ pub struct ClaimValidatorNode<'info> {
 
     #[account(
         mut,
-        seeds = [b"node_info", validator_node.key().as_ref()],
+        seeds = [b"node_info", confidential_node.key().as_ref()],
         bump = node_info.bump,
     )]
     pub node_info: Account<'info, NodeInfo>,
 }
 
-impl<'info> ClaimValidatorNode<'info> {
-    pub fn claim_validator_node(
+impl<'info> ClaimConfidentialNode<'info> {
+    pub fn claim_confidential_node(
         &mut self,
         code_measurement: [u8; 32],
         tee_signing_pubkey: Pubkey,
     ) -> Result<()> {
         require!(
-            self.node_info.node_type == NodeType::Validator,
+            self.node_info.node_type == NodeType::Confidential,
             ErrorCode::InvalidNodeType
         );
         require!(

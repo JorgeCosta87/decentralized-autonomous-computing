@@ -2,8 +2,8 @@ use anchor_lang::prelude::*;
 
 #[derive(InitSpace, AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq)]
 pub enum NodeType {
-    Validator,
-    Compute,
+    Public,
+    Confidential,
 }
 
 #[derive(InitSpace, AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq)]
@@ -29,5 +29,9 @@ pub struct NodeInfo {
     pub node_treasury: Pubkey,
     pub total_earned: u64,
     pub total_tasks_completed: u64,
+    #[max_len(10)]
+    pub approved_validators: Vec<Pubkey>,
+    #[max_len(10)]
+    pub rejected_validators: Vec<Pubkey>,
     pub bump: u8,
 }

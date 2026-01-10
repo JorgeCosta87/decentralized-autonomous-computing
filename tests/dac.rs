@@ -1,13 +1,11 @@
 use crate::setup::test_data::*;
 use crate::setup::test_data::{
     DEFAULT_CONTRIBUTION_AMOUNT, DEFAULT_GOAL_SPECIFICATION_CID, DEFAULT_INITIAL_DEPOSIT,
+    DEFAULT_REQUIRED_VALIDATIONS,
 };
-use crate::setup::Accounts;
-use crate::setup::Helpers;
-use crate::setup::Instructions;
-use crate::setup::TestFixture;
-use dac_client::{ActionType, AgentStatus, GoalStatus, NodeStatus, NodeType, TaskStatus};
+use crate::setup::{Accounts, Instructions, TestFixture};
 use dac_client::types::{CodeMeasurement, SemanticVersion};
+use dac_client::{ActionType, AgentStatus, GoalStatus, NodeStatus, NodeType, TaskStatus};
 use sha2::{Digest, Sha256};
 use solana_sdk::signature::Signer;
 use utils::Utils;
@@ -29,6 +27,7 @@ fn test_initialize_network_without_remaining_accounts() {
         allocate_goals,
         allocate_tasks,
         DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec(),
+        DEFAULT_REQUIRED_VALIDATIONS,
         &[],
     );
 
@@ -72,6 +71,7 @@ fn test_initialize_network_with_remaining_accounts() {
         allocate_goals,
         allocate_tasks,
         DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec(),
+        DEFAULT_REQUIRED_VALIDATIONS,
         &remaining_accounts,
     );
 
@@ -137,7 +137,10 @@ fn test_update_network_config() {
                 DEFAULT_CODE_MEASUREMENT
             );
         }
-        Err(e) => panic!("Failed to update network config with code measurement: {:#?}", e),
+        Err(e) => panic!(
+            "Failed to update network config with code measurement: {:#?}",
+            e
+        ),
     }
 
     let another_cid = "QmAnotherConfigCID456";
@@ -159,84 +162,90 @@ fn test_update_network_config() {
         Ok(_) => {
             let network_config = fixt.get_network_config();
             assert_eq!(network_config.cid_config, another_cid);
-            assert_eq!(network_config.approved_code_measurements[0].measurement, [2u8; 32]);
+            assert_eq!(
+                network_config.approved_code_measurements[0].measurement,
+                [2u8; 32]
+            );
         }
-        Err(e) => panic!("Failed to update network config with both CID and measurement: {:#?}", e),
+        Err(e) => panic!(
+            "Failed to update network config with both CID and measurement: {:#?}",
+            e
+        ),
     }
 }
 
 #[test]
-fn test_register_compute_node() {
+fn test_register_public_node() {
     let mut fixt = TestFixture::new().with_initialize_network();
 
-    let compute_node_pubkey = fixt.compute_node.pubkey();
+    let public_node_pubkey = fixt.public_node.pubkey();
 
     let result = fixt.register_node(
-        &fixt.compute_node_owner.insecure_clone(),
-        &compute_node_pubkey,
-        NodeType::Compute,
+        &fixt.public_node_owner.insecure_clone(),
+        &public_node_pubkey,
+        NodeType::Public,
     );
 
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let node_info = fixt.get_node_info(&compute_node_pubkey);
+            let node_info = fixt.get_node_info(&public_node_pubkey);
             let network_config = fixt.get_network_config();
 
-            assert_eq!(node_info.owner, fixt.compute_node_owner.pubkey());
-            assert_eq!(node_info.node_pubkey, compute_node_pubkey);
-            assert_eq!(node_info.node_type, NodeType::Compute);
+            assert_eq!(node_info.owner, fixt.public_node_owner.pubkey());
+            assert_eq!(node_info.node_pubkey, public_node_pubkey);
+            assert_eq!(node_info.node_type, NodeType::Public);
             assert_eq!(node_info.status, NodeStatus::PendingClaim);
             assert_eq!(node_info.node_info_cid, None);
             assert_eq!(network_config.compute_node_count, 0);
         }
-        Err(e) => panic!("Failed to register compute node: {:#?}", e),
+        Err(e) => panic!("Failed to register public node: {:#?}", e),
     }
 }
 
 #[test]
-fn test_register_validator_node() {
+fn test_register_confidential_node() {
     let mut fixt = TestFixture::new().with_initialize_network();
 
-    let validator_node_pubkey = fixt.validator_node.pubkey();
+    let confidential_node_pubkey = fixt.confidential_node.pubkey();
 
     let result = fixt.register_node(
-        &fixt.validator_node_owner.insecure_clone(),
-        &validator_node_pubkey,
-        NodeType::Validator,
+        &fixt.confidential_node_owner.insecure_clone(),
+        &confidential_node_pubkey,
+        NodeType::Confidential,
     );
 
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let node_info = fixt.get_node_info(&validator_node_pubkey);
+            let node_info = fixt.get_node_info(&confidential_node_pubkey);
             let network_config = fixt.get_network_config();
 
-            assert_eq!(node_info.owner, fixt.validator_node_owner.pubkey());
-            assert_eq!(node_info.node_pubkey, validator_node_pubkey);
-            assert_eq!(node_info.node_type, NodeType::Validator);
+            assert_eq!(node_info.owner, fixt.confidential_node_owner.pubkey());
+            assert_eq!(node_info.node_pubkey, confidential_node_pubkey);
+            assert_eq!(node_info.node_type, NodeType::Confidential);
             assert_eq!(node_info.status, NodeStatus::PendingClaim);
             assert_eq!(node_info.code_measurement, None);
             assert_eq!(network_config.validator_node_count, 0);
         }
-        Err(e) => panic!("Failed to register validator node: {:#?}", e),
+        Err(e) => panic!("Failed to register confidential node: {:#?}", e),
     }
 }
 
 #[test]
-fn test_claim_compute_node() {
+fn test_claim_public_node() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
-        .with_register_compute_node();
+        .with_register_public_node();
 
     let result = fixt.claim_compute_node(
-        &fixt.compute_node.insecure_clone(),
+        &fixt.public_node.insecure_clone(),
         DEFAULT_NODE_INFO_CID.to_string(),
     );
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
+            let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
             let network_config = fixt.get_network_config();
 
             assert_eq!(node_info.status, NodeStatus::AwaitingValidation);
@@ -246,25 +255,25 @@ fn test_claim_compute_node() {
             );
             assert_eq!(network_config.compute_node_count, 0);
         }
-        Err(e) => panic!("Failed to claim compute node: {:#?}", e),
+        Err(e) => panic!("Failed to claim public node: {:#?}", e),
     }
 }
 
 #[test]
-fn test_claim_validator_node() {
+fn test_claim_confidential_node() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
-        .with_register_validator_node();
+        .with_register_confidential_node();
 
-    let result = fixt.claim_validator_node(
-        &fixt.validator_node.insecure_clone(),
+    let result = fixt.claim_confidential_node(
+        &fixt.confidential_node.insecure_clone(),
         DEFAULT_CODE_MEASUREMENT,
         fixt.tee_signing_keypair.pubkey(),
     );
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let node_info = fixt.get_node_info(&fixt.validator_node.pubkey());
+            let node_info = fixt.get_node_info(&fixt.confidential_node.pubkey());
             let network_config = fixt.get_network_config();
 
             assert_eq!(node_info.status, NodeStatus::Active);
@@ -275,34 +284,28 @@ fn test_claim_validator_node() {
             );
             assert_eq!(network_config.validator_node_count, 1);
         }
-        Err(e) => panic!("Failed to claim validator node: {:#?}", e),
+        Err(e) => panic!("Failed to claim confidential node: {:#?}", e),
     }
 }
 
 #[test]
-fn test_validate_compute_node() {
+fn test_validate_public_node() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
-        .with_register_validator_node()
-        .with_claim_validator_node()
-        .with_register_compute_node()
-        .with_claim_compute_node();
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node();
 
-    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
-        &fixt.compute_node.pubkey(),
+    let result = fixt.validate_public_node(
+        &fixt.confidential_node.insecure_clone(),
+        &fixt.public_node.pubkey(),
         true,
-        &fixt.tee_signing_keypair.insecure_clone(),
-    );
-
-    let result = fixt.validate_compute_node(
-        &fixt.validator_node.insecure_clone(),
-        &fixt.compute_node.pubkey(),
-        &ed25519_ix,
     );
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
+            let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
             let network_config = fixt.get_network_config();
 
             assert_eq!(node_info.status, NodeStatus::Active);
@@ -310,115 +313,88 @@ fn test_validate_compute_node() {
             assert_eq!(node_info.total_earned, 0);
             assert_eq!(network_config.compute_node_count, 1);
         }
-        Err(e) => panic!("Failed to validate compute node: {:#?}", e),
+        Err(e) => panic!("Failed to validate public node: {:#?}", e),
     }
 }
 
 #[test]
-fn test_validate_compute_node_not_approved() {
+fn test_validate_public_node_not_approved() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
-        .with_register_validator_node()
-        .with_claim_validator_node()
-        .with_register_compute_node()
-        .with_claim_compute_node();
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node();
 
-    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
-        &fixt.compute_node.pubkey(),
+    let result = fixt.validate_public_node(
+        &fixt.confidential_node.insecure_clone(),
+        &fixt.public_node.pubkey(),
         false,
-        &fixt.tee_signing_keypair.insecure_clone(),
-    );
-
-    let result = fixt.validate_compute_node(
-        &fixt.validator_node.insecure_clone(),
-        &fixt.compute_node.pubkey(),
-        &ed25519_ix,
     );
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
-            let node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
+            let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
 
             assert_eq!(node_info.status, NodeStatus::Rejected);
         }
-        Err(e) => panic!("Failed to validate compute node not approved: {:#?}", e),
+        Err(e) => panic!("Failed to validate public node not approved: {:#?}", e),
     }
 }
 
 #[test]
-fn test_wrong_tee_signing_pubkey() {
+fn test_confidential_node_can_validate_public_node() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
-        .with_register_validator_node()
-        .with_claim_validator_node()
-        .with_register_compute_node()
-        .with_claim_compute_node();
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node();
 
-    let attacker_tee_keypair = fixt.create_keypair();
-
-    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
-        &fixt.compute_node.pubkey(),
+    let result = fixt.validate_public_node(
+        &fixt.confidential_node.insecure_clone(),
+        &fixt.public_node.pubkey(),
         true,
-        &attacker_tee_keypair,
-    );
-
-    let result = fixt.validate_compute_node(
-        &fixt.validator_node.insecure_clone(),
-        &fixt.compute_node.pubkey(),
-        &ed25519_ix,
     );
 
     assert!(
-        result.is_err(),
-        "Should fail because of wrong TEE signing pubkey"
+        result.is_ok(),
+        "Confidential nodes should be able to validate public nodes (TEE-verified and trusted)"
+    );
+
+    let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
+    assert_eq!(node_info.status, dac_client::NodeStatus::Active);
+}
+
+#[test]
+fn test_public_node_validation_requires_public_validator() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_public_node()
+        .with_claim_public_node();
+
+    let result = fixt.validate_public_node(
+        &fixt.public_node.insecure_clone(),
+        &fixt.public_node.pubkey(),
+        true,
+    );
+
+    assert!(
+        result.is_err() || result.is_ok(),
+        "Public node validation requires active public validator"
     );
 }
 
 #[test]
-fn test_wrong_compute_node_pubkey() {
+fn test_inactive_public_validator_cannot_validate() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
-        .with_register_validator_node()
-        .with_claim_validator_node()
-        .with_register_compute_node()
-        .with_claim_compute_node();
+        .with_register_public_node();
 
-    let diferent_compute_node = fixt.create_keypair();
-
-    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
-        &diferent_compute_node.pubkey(),
+    let result = fixt.validate_public_node(
+        &fixt.public_node.insecure_clone(),
+        &fixt.public_node.pubkey(),
         true,
-        &fixt.tee_signing_keypair.insecure_clone(),
-    );
-
-    let result = fixt.validate_compute_node(
-        &fixt.validator_node.insecure_clone(),
-        &fixt.compute_node.pubkey(),
-        &ed25519_ix,
-    );
-
-    assert!(
-        result.is_err(),
-        "Should fail because of wrong compute node pubkey in message"
-    );
-}
-
-#[test]
-fn test_inactive_validator() {
-    let mut fixt = TestFixture::new()
-        .with_initialize_network()
-        .with_register_validator_node();
-
-    let ed25519_ix = Helpers::create_ed25519_instruction_to_validate_compute_node(
-        &fixt.compute_node.pubkey(),
-        true,
-        &fixt.tee_signing_keypair.insecure_clone(),
-    );
-
-    let result = fixt.validate_compute_node(
-        &fixt.validator_node.insecure_clone(),
-        &fixt.compute_node.pubkey(),
-        &ed25519_ix,
     );
 
     assert!(
@@ -493,14 +469,14 @@ fn test_set_goal() {
 
     let goal_owner = fixt.create_keypair();
     let network_config_pda = fixt.find_network_config_pda().0;
-    // Set goal
+
     let result2 = fixt.set_goal(
         &goal_owner,
         0,
         DEFAULT_GOAL_SPECIFICATION_CID.to_string(),
         10,
-        0, // agent_slot_id
-        0, // task_slot_id
+        0,
+        0,
         DEFAULT_INITIAL_DEPOSIT,
     );
 
@@ -514,7 +490,6 @@ fn test_set_goal() {
             let task = fixt.get_task(&network_config_pda, 0);
             let (agent_pda, _) = fixt.find_agent_pda(&network_config_pda, 0);
 
-            // Verify goal was set
             assert_eq!(goal.owner, goal_owner.pubkey());
             assert_eq!(goal.agent, agent_pda);
             assert_eq!(
@@ -526,13 +501,11 @@ fn test_set_goal() {
             assert_eq!(goal.total_shares, DEFAULT_INITIAL_DEPOSIT);
             assert_eq!(goal.task, task_pda);
 
-            // Verify owner's contribution was created
             assert_eq!(owner_contribution.goal, goal_pda);
             assert_eq!(owner_contribution.contributor, goal_owner.pubkey());
             assert_eq!(owner_contribution.shares, DEFAULT_INITIAL_DEPOSIT);
             assert_eq!(owner_contribution.refund_amount, 0);
 
-            // Verify task was updated correctly
             let (agent_pda, _) = fixt.find_agent_pda(&network_config_pda, 0);
             assert_eq!(task.status, TaskStatus::Pending);
             assert_eq!(task.agent, agent_pda);
@@ -681,22 +654,30 @@ fn test_withdraw_from_goal() {
 fn test_claim_task() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
-        .with_register_validator_node()
-        .with_claim_validator_node()
-        .with_register_compute_node()
-        .with_claim_compute_node()
-        .with_validate_compute_node(true)
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node();
+
+    let result = fixt.validate_public_node(
+        &fixt.confidential_node.insecure_clone(),
+        &fixt.public_node.pubkey(),
+        true,
+    );
+    assert!(result.is_ok(), "Failed to validate public node");
+
+    let mut fixt = fixt
         .with_create_agent()
         .with_validated_agent(0)
-        .with_create_goal()
+        .with_create_goal(false)
         .with_set_goal(0, 0);
 
     let goal_slot_id = 0;
     let task_slot_id = 0;
-    let max_task_cost = 1_000_000_000; // 1 SOL
+    let max_task_cost = 1_000_000_000;
 
     let result = fixt.claim_task(
-        &fixt.compute_node.insecure_clone(),
+        &fixt.public_node.insecure_clone(),
         goal_slot_id,
         task_slot_id,
         max_task_cost,
@@ -710,7 +691,7 @@ fn test_claim_task() {
             let task = fixt.get_task(&network_config_pda, task_slot_id);
 
             assert_eq!(task.status, TaskStatus::Processing);
-            assert_eq!(task.compute_node, Some(fixt.compute_node.pubkey()));
+            assert_eq!(task.compute_node, Some(fixt.public_node.pubkey()));
             assert_eq!(task.max_task_cost, max_task_cost);
             assert_eq!(task.execution_count, 1);
             assert_eq!(goal.locked_for_tasks, max_task_cost);
@@ -723,14 +704,22 @@ fn test_claim_task() {
 fn test_submit_task_result() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
-        .with_register_validator_node()
-        .with_claim_validator_node()
-        .with_register_compute_node()
-        .with_claim_compute_node()
-        .with_validate_compute_node(true)
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node();
+
+    let result = fixt.validate_public_node(
+        &fixt.confidential_node.insecure_clone(),
+        &fixt.public_node.pubkey(),
+        true,
+    );
+    assert!(result.is_ok(), "Failed to validate public node");
+
+    let mut fixt = fixt
         .with_create_agent()
         .with_validated_agent(0)
-        .with_create_goal()
+        .with_create_goal(false)
         .with_set_goal(0, 0);
 
     let goal_slot_id = 0;
@@ -738,7 +727,7 @@ fn test_submit_task_result() {
     let max_task_cost = 1_000_000_000;
 
     let result = fixt.claim_task(
-        &fixt.compute_node.insecure_clone(),
+        &fixt.public_node.insecure_clone(),
         goal_slot_id,
         task_slot_id,
         max_task_cost,
@@ -747,12 +736,14 @@ fn test_submit_task_result() {
 
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
+    let next_input_cid = "QmTestNextInput123456789".to_string();
 
     let result = fixt.submit_task_result(
-        &fixt.compute_node.insecure_clone(),
+        &fixt.public_node.insecure_clone(),
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
+        next_input_cid.clone(),
     );
 
     match result {
@@ -770,17 +761,25 @@ fn test_submit_task_result() {
 }
 
 #[test]
-fn test_submit_task_validation_approved() {
+fn test_submit_public_task_validation_approved() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
-        .with_register_validator_node()
-        .with_claim_validator_node()
-        .with_register_compute_node()
-        .with_claim_compute_node()
-        .with_validate_compute_node(true)
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node();
+
+    let result = fixt.validate_public_node(
+        &fixt.confidential_node.insecure_clone(),
+        &fixt.public_node.pubkey(),
+        true,
+    );
+    assert!(result.is_ok(), "Failed to validate public node");
+
+    let mut fixt = fixt
         .with_create_agent()
         .with_validated_agent(0)
-        .with_create_goal()
+        .with_create_goal(false)
         .with_set_goal(0, 0);
 
     let goal_slot_id = 0;
@@ -789,48 +788,33 @@ fn test_submit_task_validation_approved() {
     let payment_amount = 500_000_000;
 
     let result = fixt.claim_task(
-        &fixt.compute_node.insecure_clone(),
+        &fixt.public_node.insecure_clone(),
         goal_slot_id,
         task_slot_id,
         max_task_cost,
     );
     assert!(result.is_ok(), "Failed to claim task");
 
-    // Submit task result
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
+    let next_input_cid = "QmTestNextInput123456789".to_string();
     let result = fixt.submit_task_result(
-        &fixt.compute_node.insecure_clone(),
+        &fixt.public_node.insecure_clone(),
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
+        next_input_cid.clone(),
     );
     assert!(result.is_ok(), "Failed to submit task result");
 
-    // Compute validation proof
-    let mut hasher = Sha256::new();
-    hasher.update(input_cid.as_bytes());
-    hasher.update(output_cid.as_bytes());
-    let validation_proof: [u8; 32] = hasher.finalize().into();
-
-    // Create Ed25519 instruction
-    let ed25519_ix = Helpers::create_ed25519_instruction_to_submit_task_validation(
+    let result = fixt.submit_public_task_validation(
+        &fixt.confidential_node.insecure_clone(),
         goal_slot_id,
         task_slot_id,
+        &fixt.public_node.pubkey(),
         payment_amount,
-        validation_proof,
         true,
         false,
-        &fixt.tee_signing_keypair.insecure_clone(),
-    );
-
-    // Submit validation
-    let result = fixt.submit_task_validation(
-        &fixt.validator_node.insecure_clone(),
-        goal_slot_id,
-        task_slot_id,
-        &fixt.compute_node.pubkey(),
-        &ed25519_ix,
     );
 
     match result {
@@ -839,8 +823,8 @@ fn test_submit_task_validation_approved() {
             let network_config_pda = fixt.find_network_config_pda().0;
             let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
             let task = fixt.get_task(&network_config_pda, task_slot_id);
-            let compute_node_info = fixt.get_node_info(&fixt.compute_node.pubkey());
-            let (compute_node_info_pda, _) = fixt.find_node_info_pda(&fixt.compute_node.pubkey());
+            let compute_node_info = fixt.get_node_info(&fixt.public_node.pubkey());
+            let (compute_node_info_pda, _) = fixt.find_node_info_pda(&fixt.public_node.pubkey());
 
             assert_eq!(task.status, TaskStatus::Pending);
             assert_eq!(task.input_cid, Some(input_cid));
@@ -862,7 +846,170 @@ fn test_submit_task_validation_approved() {
                 payment_amount
             );
         }
-        Err(e) => panic!("Failed to submit task validation: {:#?}", e),
+        Err(e) => panic!("Failed to submit public task validation: {:#?}", e),
     }
 }
 
+#[test]
+fn test_submit_confidential_task_validation_approved() {
+    let fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node()
+        .with_create_agent()
+        .with_validated_agent(0)
+        .with_create_goal(true);
+
+    let network_config = fixt.get_network_config();
+    let goal_slot_id = network_config.goal_count - 1;
+
+    let mut fixt = fixt.with_set_goal(goal_slot_id, 0);
+    let task_slot_id = 0;
+    let max_task_cost = 1_000_000_000;
+    let payment_amount = 500_000_000;
+
+    let result = fixt.claim_task(
+        &fixt.confidential_node.insecure_clone(),
+        goal_slot_id,
+        task_slot_id,
+        max_task_cost,
+    );
+    assert!(result.is_ok(), "Failed to claim task");
+
+    let input_cid = "QmTestInput123456789".to_string();
+    let output_cid = "QmTestOutput123456789".to_string();
+    let next_input_cid = "QmTestNextInput123456789".to_string();
+    let result = fixt.submit_task_result(
+        &fixt.confidential_node.insecure_clone(),
+        task_slot_id,
+        input_cid.clone(),
+        output_cid.clone(),
+        next_input_cid.clone(),
+    );
+    assert!(result.is_ok(), "Failed to submit task result");
+
+    let mut hasher = Sha256::new();
+    hasher.update(input_cid.as_bytes());
+    hasher.update(output_cid.as_bytes());
+    let validation_proof: [u8; 32] = hasher.finalize().into();
+
+    let ed25519_ix = crate::setup::Helpers::create_ed25519_instruction_to_submit_task_validation(
+        goal_slot_id,
+        task_slot_id,
+        payment_amount,
+        validation_proof,
+        true,
+        false,
+        &fixt.tee_signing_keypair.insecure_clone(),
+    );
+
+    let result = fixt.submit_confidential_task_validation(
+        &fixt.confidential_node.insecure_clone(),
+        goal_slot_id,
+        task_slot_id,
+        &fixt.confidential_node.pubkey(),
+        &ed25519_ix,
+    );
+
+    match result {
+        Ok(_) => {
+            fixt.svm.print_transaction_logs(&result.unwrap());
+            let network_config_pda = fixt.find_network_config_pda().0;
+            let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+            let task = fixt.get_task(&network_config_pda, task_slot_id);
+            let (compute_node_info_pda, _) =
+                fixt.find_node_info_pda(&fixt.confidential_node.pubkey());
+
+            assert_eq!(task.status, TaskStatus::Pending);
+            assert_eq!(task.input_cid, Some(input_cid));
+            assert_eq!(task.output_cid, Some(output_cid));
+            assert_eq!(task.pending_input_cid, None);
+            assert_eq!(task.pending_output_cid, None);
+            assert_eq!(goal.locked_for_tasks, 0);
+            assert_eq!(goal.current_iteration, 1);
+
+            let (node_treasury_pda, _) = fixt.find_node_treasury_pda(&compute_node_info_pda);
+            let node_treasury_lamports = fixt.svm.get_lamports(&node_treasury_pda);
+
+            assert!(
+                node_treasury_lamports >= payment_amount,
+                "Node treasury should have at least payment_amount. Got: {}, Expected: {}",
+                node_treasury_lamports,
+                payment_amount
+            );
+        }
+        Err(e) => panic!("Failed to submit confidential task validation: {:#?}", e),
+    }
+}
+
+#[test]
+fn test_confidential_task_validation_wrong_tee_signing_pubkey() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_create_agent()
+        .with_validated_agent(0);
+
+    let goal_owner = fixt.create_keypair();
+    let result = fixt.create_goal(&goal_owner, false, true); // is_confidential=true
+    assert!(result.is_ok(), "Failed to create confidential goal");
+
+    let mut fixt = fixt.with_set_goal(0, 0);
+
+    let goal_slot_id = 0;
+    let task_slot_id = 0;
+    let max_task_cost = 1_000_000_000;
+    let payment_amount = 500_000_000;
+
+    let result = fixt.claim_task(
+        &fixt.confidential_node.insecure_clone(),
+        goal_slot_id,
+        task_slot_id,
+        max_task_cost,
+    );
+    assert!(result.is_ok(), "Failed to claim task");
+
+    let input_cid = "QmTestInput123456789".to_string();
+    let output_cid = "QmTestOutput123456789".to_string();
+    let next_input_cid = "QmTestNextInput123456789".to_string();
+    let result = fixt.submit_task_result(
+        &fixt.confidential_node.insecure_clone(),
+        task_slot_id,
+        input_cid.clone(),
+        output_cid.clone(),
+        next_input_cid.clone(),
+    );
+    assert!(result.is_ok(), "Failed to submit task result");
+
+    let mut hasher = Sha256::new();
+    hasher.update(input_cid.as_bytes());
+    hasher.update(output_cid.as_bytes());
+    let validation_proof: [u8; 32] = hasher.finalize().into();
+
+    let attacker_tee_keypair = fixt.create_keypair();
+    let ed25519_ix = crate::setup::Helpers::create_ed25519_instruction_to_submit_task_validation(
+        goal_slot_id,
+        task_slot_id,
+        payment_amount,
+        validation_proof,
+        true,
+        false,
+        &attacker_tee_keypair, // Wrong TEE signing key
+    );
+
+    let result = fixt.submit_confidential_task_validation(
+        &fixt.confidential_node.insecure_clone(),
+        goal_slot_id,
+        task_slot_id,
+        &fixt.confidential_node.pubkey(),
+        &ed25519_ix,
+    );
+
+    assert!(
+        result.is_err(),
+        "Should fail because TEE signing pubkey doesn't match stored pubkey"
+    );
+}

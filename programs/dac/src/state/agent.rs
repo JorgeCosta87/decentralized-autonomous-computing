@@ -17,5 +17,9 @@ pub struct Agent {
     pub agent_config_cid: String,
     #[max_len(128)]
     pub agent_memory_cid: Option<String>,
+    #[max_len(10)]
+    pub approved_validators: Vec<Pubkey>,
+    #[max_len(10)]
+    pub rejected_validators: Vec<Pubkey>,
     pub bump: u8,
 }

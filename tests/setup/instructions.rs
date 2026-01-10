@@ -1,8 +1,9 @@
 use dac_client::instructions::{
-    ClaimComputeNodeBuilder, ClaimTaskBuilder, ClaimValidatorNodeBuilder, ContributeToGoalBuilder,
-    CreateAgentBuilder, CreateGoalBuilder, InitializeNetworkBuilder, RegisterNodeBuilder,
-    SetGoalBuilder, SubmitTaskResultBuilder, SubmitTaskValidationBuilder, UpdateNetworkConfigBuilder,
-    ValidateAgentBuilder, ValidateComputeNodeBuilder, WithdrawFromGoalBuilder,
+    ClaimConfidentialNodeBuilder, ClaimPublicNodeBuilder, ClaimTaskBuilder,
+    ContributeToGoalBuilder, CreateAgentBuilder, CreateGoalBuilder, InitializeNetworkBuilder,
+    RegisterNodeBuilder, SetGoalBuilder, SubmitConfidentialTaskValidationBuilder,
+    SubmitPublicTaskValidationBuilder, SubmitTaskResultBuilder, UpdateNetworkConfigBuilder,
+    ValidateAgentBuilder, ValidatePublicNodeBuilder, WithdrawFromGoalBuilder,
 };
 use dac_client::types::{CodeMeasurement, NodeType};
 use litesvm::types::TransactionResult;
@@ -26,6 +27,7 @@ pub trait Instructions {
         allocate_goals: u64,
         allocate_tasks: u64,
         approved_code_measurements: Vec<CodeMeasurement>,
+        required_validations: u32,
         remaining_accounts: &[AccountMeta],
     ) -> TransactionResult;
     fn register_node(
@@ -41,21 +43,25 @@ pub trait Instructions {
         node_info_cid: String,
     ) -> TransactionResult;
 
-    fn claim_validator_node(
+    fn claim_confidential_node(
         &mut self,
-        validator_node: &Keypair,
+        confidential_node: &Keypair,
         code_measurement: [u8; 32],
         tee_signing_pubkey: Pubkey,
     ) -> TransactionResult;
 
-    fn validate_compute_node(
+    fn validate_public_node(
         &mut self,
-        validator_node: &Keypair,
-        compute_node_pubkey: &Pubkey,
-        ed25519_ix: &Instruction,
+        node: &Keypair,
+        node_to_validate_pubkey: &Pubkey,
+        approved: bool,
     ) -> TransactionResult;
 
-    fn validate_agent(&mut self, validator: &Keypair, agent_slot_id: u64) -> TransactionResult;
+    fn validate_agent(
+        &mut self,
+        node_validating: &Keypair,
+        agent_slot_id: u64,
+    ) -> TransactionResult;
 
     fn create_agent(
         &mut self,
@@ -63,7 +69,12 @@ pub trait Instructions {
         agent_config_cid: String,
     ) -> TransactionResult;
 
-    fn create_goal(&mut self, payer: &Keypair, is_public: bool) -> TransactionResult;
+    fn create_goal(
+        &mut self,
+        payer: &Keypair,
+        is_public: bool,
+        is_confidential: bool,
+    ) -> TransactionResult;
 
     fn set_goal(
         &mut self,
@@ -104,15 +115,27 @@ pub trait Instructions {
         task_slot_id: u64,
         input_cid: String,
         output_cid: String,
+        next_input_cid: String,
     ) -> TransactionResult;
 
-    fn submit_task_validation(
+    fn submit_confidential_task_validation(
         &mut self,
-        validator: &Keypair,
+        node_validating: &Keypair,
         goal_slot_id: u64,
         task_slot_id: u64,
         compute_node_pubkey: &Pubkey,
         ed25519_ix: &Instruction,
+    ) -> TransactionResult;
+
+    fn submit_public_task_validation(
+        &mut self,
+        node_validating: &Keypair,
+        goal_slot_id: u64,
+        task_slot_id: u64,
+        compute_node_pubkey: &Pubkey,
+        payment_amount: u64,
+        approved: bool,
+        goal_completed: bool,
     ) -> TransactionResult;
 
     fn update_network_config(
@@ -132,6 +155,7 @@ impl Instructions for TestFixture {
         allocate_goals: u64,
         allocate_tasks: u64,
         approved_code_measurements: Vec<CodeMeasurement>,
+        required_validations: u32,
         remaining_accounts: &[AccountMeta],
     ) -> TransactionResult {
         let authority_pubkey = authority.pubkey();
@@ -143,7 +167,8 @@ impl Instructions for TestFixture {
             .cid_config(cid_config)
             .allocate_goals(allocate_goals)
             .allocate_tasks(allocate_tasks)
-            .approved_code_measurements(approved_code_measurements);
+            .approved_code_measurements(approved_code_measurements)
+            .required_validations(required_validations);
 
         if !remaining_accounts.is_empty() {
             builder.add_remaining_accounts(remaining_accounts);
@@ -189,9 +214,9 @@ impl Instructions for TestFixture {
         let network_config_pda = self.find_network_config_pda().0;
         let (node_info_pda, _) = self.find_node_info_pda(&compute_node_pubkey);
 
-        let mut builder = ClaimComputeNodeBuilder::new();
+        let mut builder = ClaimPublicNodeBuilder::new();
         builder
-            .compute_node(compute_node_pubkey)
+            .node(compute_node_pubkey)
             .network_config(network_config_pda)
             .node_info(node_info_pda)
             .node_info_cid(node_info_cid);
@@ -203,19 +228,19 @@ impl Instructions for TestFixture {
         )
     }
 
-    fn claim_validator_node(
+    fn claim_confidential_node(
         &mut self,
-        validator_node: &Keypair,
+        confidential_node: &Keypair,
         code_measurement: [u8; 32],
         tee_signing_pubkey: Pubkey,
     ) -> TransactionResult {
-        let validator_node_pubkey = validator_node.pubkey();
+        let confidential_node_pubkey = confidential_node.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
-        let (node_info_pda, _) = self.find_node_info_pda(&validator_node_pubkey);
+        let (node_info_pda, _) = self.find_node_info_pda(&confidential_node_pubkey);
 
-        let mut builder = ClaimValidatorNodeBuilder::new();
+        let mut builder = ClaimConfidentialNodeBuilder::new();
         builder
-            .validator_node(validator_node_pubkey)
+            .confidential_node(confidential_node_pubkey)
             .network_config(network_config_pda)
             .node_info(node_info_pda)
             .code_measurement(code_measurement)
@@ -223,52 +248,50 @@ impl Instructions for TestFixture {
 
         self.svm.send_tx(
             &[builder.instruction()],
-            &validator_node_pubkey,
-            &[validator_node],
+            &confidential_node_pubkey,
+            &[confidential_node],
         )
     }
 
-    fn validate_compute_node(
+    fn validate_public_node(
         &mut self,
-        validator_node: &Keypair,
-        compute_node_pubkey: &Pubkey,
-        ed25519_ix: &Instruction,
+        node: &Keypair,
+        node_to_validate_pubkey: &Pubkey,
+        approved: bool,
     ) -> TransactionResult {
-        let validator_node_pubkey = validator_node.pubkey();
+        let node_pubkey = node.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
-        let (validator_node_info_pda, _) = self.find_node_info_pda(&validator_node_pubkey);
-        let (compute_node_info_pda, _) = self.find_node_info_pda(compute_node_pubkey);
+        let (node_info_pda, _) = self.find_node_info_pda(&node_pubkey);
+        let (node_to_validate_info_pda, _) = self.find_node_info_pda(node_to_validate_pubkey);
 
-        let mut builder = ValidateComputeNodeBuilder::new();
+        let mut builder = ValidatePublicNodeBuilder::new();
         builder
-            .validator_node_pubkey(validator_node_pubkey)
+            .node_validating(node_pubkey)
             .network_config(network_config_pda)
-            .validator_node_info(validator_node_info_pda)
-            .compute_node_info(compute_node_info_pda)
-            .instruction_sysvar(solana_sdk::sysvar::instructions::id());
+            .node_validating_info(node_info_pda)
+            .node_info(node_to_validate_info_pda)
+            .approved(approved);
 
         let validate_ix = builder.instruction();
 
-        self.svm.send_tx(
-            &[ed25519_ix.clone(), validate_ix],
-            &validator_node_pubkey,
-            &[validator_node],
-        )
+        self.svm.send_tx(&[validate_ix], &node_pubkey, &[node])
     }
 
-    fn validate_agent(&mut self, validator: &Keypair, agent_slot_id: u64) -> TransactionResult {
-        let validator_pubkey = validator.pubkey();
+    fn validate_agent(&mut self, node: &Keypair, agent_slot_id: u64) -> TransactionResult {
+        let node_pubkey = node.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
         let (agent_pda, _) = self.find_agent_pda(&network_config_pda, agent_slot_id);
+        let (node_info_pda, _) = self.find_node_info_pda(&node_pubkey);
 
         let mut builder = ValidateAgentBuilder::new();
         builder
-            .validator(validator_pubkey)
+            .node(node_pubkey)
             .agent(agent_pda)
+            .node_info(node_info_pda)
             .network_config(network_config_pda);
 
         self.svm
-            .send_tx(&[builder.instruction()], &validator_pubkey, &[validator])
+            .send_tx(&[builder.instruction()], &node_pubkey, &[node])
     }
 
     fn create_agent(
@@ -296,7 +319,12 @@ impl Instructions for TestFixture {
         )
     }
 
-    fn create_goal(&mut self, owner: &Keypair, is_public: bool) -> TransactionResult {
+    fn create_goal(
+        &mut self,
+        owner: &Keypair,
+        is_owned: bool,
+        is_confidential: bool,
+    ) -> TransactionResult {
         let owner_pubkey = owner.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
         let network_config = self.get_network_config();
@@ -309,7 +337,8 @@ impl Instructions for TestFixture {
             .owner(owner_pubkey)
             .network_config(network_config_pda)
             .goal(goal_pda)
-            .is_public(is_public);
+            .is_owned(is_owned)
+            .is_confidential(is_confidential);
 
         self.svm
             .send_tx(&[builder.instruction()], &owner_pubkey, &[owner])
@@ -443,18 +472,39 @@ impl Instructions for TestFixture {
         task_slot_id: u64,
         input_cid: String,
         output_cid: String,
+        next_input_cid: String,
     ) -> TransactionResult {
         let compute_node_pubkey = compute_node.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
 
+        // Goal has task field, so find goal by checking which goal has this task
+        let network_config = self.get_network_config();
+        let mut goal_slot_id = None;
+        for i in 0..network_config.goal_count {
+            let (test_goal_pda, _) = self.find_goal_pda(&network_config_pda, i);
+            let goal_account = self.svm.get_account(&test_goal_pda);
+            if let Some(acc) = goal_account {
+                use dac_client::accounts::Goal;
+                let goal = Goal::from_bytes(&acc.data).expect("Failed to deserialize Goal");
+                if goal.task == task_pda {
+                    goal_slot_id = Some(i);
+                    break;
+                }
+            }
+        }
+        let goal_slot_id = goal_slot_id.expect("Goal not found for task");
+        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+
         let mut builder = SubmitTaskResultBuilder::new();
         builder
             .compute_node(compute_node_pubkey)
             .task(task_pda)
+            .goal(goal_pda)
             .network_config(network_config_pda)
             .input_cid(input_cid)
-            .output_cid(output_cid);
+            .output_cid(output_cid)
+            .next_input_cid(next_input_cid);
 
         self.svm.send_tx(
             &[builder.instruction()],
@@ -463,15 +513,15 @@ impl Instructions for TestFixture {
         )
     }
 
-    fn submit_task_validation(
+    fn submit_confidential_task_validation(
         &mut self,
-        validator: &Keypair,
+        node_validating: &Keypair,
         goal_slot_id: u64,
         task_slot_id: u64,
         compute_node_pubkey: &Pubkey,
         ed25519_ix: &Instruction,
     ) -> TransactionResult {
-        let validator_pubkey = validator.pubkey();
+        let validator_pubkey = node_validating.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
         let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
@@ -480,13 +530,13 @@ impl Instructions for TestFixture {
         let (node_treasury_pda, _) = self.find_node_treasury_pda(&compute_node_info_pda);
         let (validator_node_info_pda, _) = self.find_node_info_pda(&validator_pubkey);
 
-        let mut builder = SubmitTaskValidationBuilder::new();
+        let mut builder = SubmitConfidentialTaskValidationBuilder::new();
         builder
-            .validator(validator_pubkey)
+            .node_validating(validator_pubkey)
             .goal(goal_pda)
             .vault(vault_pda)
             .task(task_pda)
-            .compute_node_info(compute_node_info_pda)
+            .node_info(compute_node_info_pda)
             .node_treasury(node_treasury_pda)
             .validator_node_info(validator_node_info_pda)
             .network_config(network_config_pda)
@@ -497,8 +547,48 @@ impl Instructions for TestFixture {
         self.svm.send_tx(
             &[ed25519_ix.clone(), validate_ix],
             &validator_pubkey,
-            &[validator],
+            &[node_validating],
         )
+    }
+
+    fn submit_public_task_validation(
+        &mut self,
+        node_validating: &Keypair,
+        goal_slot_id: u64,
+        task_slot_id: u64,
+        compute_node_pubkey: &Pubkey,
+        payment_amount: u64,
+        approved: bool,
+        goal_completed: bool,
+    ) -> TransactionResult {
+        let node_validating_pubkey = node_validating.pubkey();
+        let network_config_pda = self.find_network_config_pda().0;
+        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+        let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
+        let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
+        let (compute_node_info_pda, _) = self.find_node_info_pda(compute_node_pubkey);
+        let (node_treasury_pda, _) = self.find_node_treasury_pda(&compute_node_info_pda);
+        let (node_validating_info_pda, _) = self.find_node_info_pda(&node_validating_pubkey);
+
+        let mut builder = SubmitPublicTaskValidationBuilder::new();
+        builder
+            .node_validating(node_validating_pubkey)
+            .goal(goal_pda)
+            .vault(vault_pda)
+            .task(task_pda)
+            .node_info(compute_node_info_pda)
+            .node_treasury(node_treasury_pda)
+            .validator_node_info(node_validating_info_pda)
+            .network_config(network_config_pda)
+            .instruction_sysvar(solana_sdk::sysvar::instructions::id())
+            .payment_amount(payment_amount)
+            .approved(approved)
+            .goal_completed(goal_completed);
+
+        let validate_ix = builder.instruction();
+
+        self.svm
+            .send_tx(&[validate_ix], &node_validating_pubkey, &[node_validating])
     }
 
     fn update_network_config(

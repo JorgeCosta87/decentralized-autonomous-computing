@@ -29,14 +29,14 @@ impl<'info> UpdateNetworkConfig<'info> {
         }
 
         if let Some(measurement) = new_code_measurement {
-            if !self.network_config.approved_code_measurements
+            if !self
+                .network_config
+                .approved_code_measurements
                 .iter()
                 .any(|m| m.measurement == measurement.measurement)
             {
-                self.network_config.add_code_measurement(
-                    measurement.measurement,
-                    measurement.version,
-                );
+                self.network_config
+                    .add_code_measurement(measurement.measurement, measurement.version);
             }
         }
 

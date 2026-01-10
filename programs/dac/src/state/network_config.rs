@@ -21,6 +21,7 @@ pub struct NetworkConfig {
     pub task_count: u64,
     pub validator_node_count: u64,
     pub compute_node_count: u64,
+    pub required_validations: u32,
     #[max_len(10)]
     pub approved_code_measurements: Vec<CodeMeasurement>,
     pub bump: u8,

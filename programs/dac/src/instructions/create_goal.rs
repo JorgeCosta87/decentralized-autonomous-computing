@@ -34,14 +34,19 @@ pub struct CreateGoal<'info> {
 }
 
 impl<'info> CreateGoal<'info> {
-    pub fn create_goal(&mut self, is_public: bool, bumps: &CreateGoalBumps) -> Result<()> {
+    pub fn create_goal(
+        &mut self,
+        is_owned: bool,
+        is_confidential: bool,
+        bumps: &CreateGoalBumps,
+    ) -> Result<()> {
         let goal_slot_id = self.network_config.next_goal_slot_id();
         let genesis_hash = self.network_config.genesis_hash;
 
-        let owner = if is_public {
-            Pubkey::default()
-        } else {
+        let owner = if is_owned {
             self.owner.key()
+        } else {
+            Pubkey::default()
         };
 
         self.goal.set_inner(Goal {
@@ -58,6 +63,7 @@ impl<'info> CreateGoal<'info> {
             chain_proof: genesis_hash,
             total_shares: 0,
             locked_for_tasks: 0,
+            is_confidential,
             vault_bump: 0,
             bump: bumps.goal,
         });

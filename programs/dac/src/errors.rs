@@ -56,4 +56,6 @@ pub enum ErrorCode {
     InvalidCID,
     #[msg("Invalid authority")]
     InvalidAuthority,
+    #[msg("Duplicate validation")]
+    DuplicateValidation,
 }

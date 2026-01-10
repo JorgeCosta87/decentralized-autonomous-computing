@@ -44,6 +44,8 @@ impl<'info> CreateAgent<'info> {
             agent_config_cid,
             agent_memory_cid: None,
             status: AgentStatus::Pending,
+            approved_validators: Vec::new(),
+            rejected_validators: Vec::new(),
             bump: bumps.agent,
         });
 

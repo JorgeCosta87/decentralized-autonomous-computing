@@ -30,6 +30,7 @@ impl<'info> InitializeNetwork<'info> {
         allocate_goals: u64,
         allocate_tasks: u64,
         approved_code_measurements: Vec<CodeMeasurement>,
+        required_validations: u32,
         remaining_accounts: &[AccountInfo<'info>],
         bumps: &InitializeNetworkBumps,
     ) -> Result<()> {
@@ -55,6 +56,7 @@ impl<'info> InitializeNetwork<'info> {
             validator_node_count: 0,
             compute_node_count: 0,
             approved_code_measurements: approved_code_measurements,
+            required_validations: required_validations,
             bump: bumps.network_config,
         });
 
@@ -122,6 +124,7 @@ impl<'info> InitializeNetwork<'info> {
                 chain_proof: genesis_hash,
                 total_shares: 0,
                 locked_for_tasks: 0,
+                is_confidential: false,
                 vault_bump: 0,
                 bump,
             };
@@ -164,11 +167,14 @@ impl<'info> InitializeNetwork<'info> {
                 output_cid: None,
                 pending_input_cid: None,
                 pending_output_cid: None,
+                next_input_cid: None,
                 chain_proof: genesis_hash,
                 agent: Pubkey::default(),
                 compute_node: None,
                 execution_count: 0,
                 max_task_cost: 0,
+                approved_validators: Vec::new(),
+                rejected_validators: Vec::new(),
                 bump,
             };
 
