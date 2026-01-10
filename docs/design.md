@@ -23,8 +23,17 @@ Existing AI agent systems face several critical challenges:
    - Pre-allocation of goal and task slots for efficient resource management
 
 2. **Node Management**
-   - Validator nodes must prove genuine Intel SGX hardware through attestation
-   - Compute nodes must pass benchmark validation before accepting tasks
+   - **Public Nodes**: Standard nodes that can:
+     - Execute public tasks (cannot execute confidential tasks)
+     - Validate any tasks (public or confidential) and other public nodes
+     - Must pass benchmark validation by multiple validators before becoming active
+   - **Confidential Nodes**: Nodes running in TEE (Trusted Execution Environment) that can:
+     - Execute both public and confidential tasks (TEE protection for private data)
+     - Validate any tasks (public or confidential) and other public nodes
+     - Self-approved via TEE attestation (no multi-validator consensus needed)
+     - Must prove genuine Intel SGX hardware through attestation
+   - **Key Distinction**: Only confidential nodes can **CLAIM/EXECUTE** confidential tasks. However, **any active node** (public or confidential) can **VALIDATE** task execution results.
+   - All nodes track validators who approved them
    - Real-time node status tracking and event subscription
 
 3. **Agent Management**
@@ -34,9 +43,13 @@ Existing AI agent systems face several critical challenges:
 
 4. **Goal & Task Execution**
    - Goals define objectives with iteration limits and treasury funding
+   - Goals can be **public** or **confidential** (for private data processing)
+   - **Confidential goals** can only be claimed by **confidential nodes** (TEE environment)
+   - **Public goals** can be claimed by any active node (public or confidential)
    - Tasks are pre-allocated and reused across goal iterations
-   - Compute nodes claim and execute tasks using LLM
-   - Validators verify task execution and determine completion
+   - Nodes execute tasks using LLM
+   - **Any active node** (public or confidential) can validate task execution
+   - Multi-validator consensus: tasks require `required_validations` threshold before processing
 
 5. **Payment System**
    - Each goal has an associated vault (SystemAccount PDA)
@@ -50,11 +63,15 @@ Existing AI agent systems face several critical challenges:
 ### Non-Functional Requirements
 
 1. **Security**
-   - All validator operations must run in Intel SGX TEE
-   - TEE attestation required for validator registration
-   - Code measurement whitelist enforcement
-   - Cryptographic signatures for all validations
+   - **Confidential nodes** must run in Intel SGX TEE for private data processing
+   - TEE attestation required for confidential node registration
+   - Code measurement whitelist enforcement for confidential nodes
+   - **Public nodes** use standard validation (no TEE required)
+   - **Key Distinction**: Only confidential nodes can **CLAIM/EXECUTE** confidential tasks. However, **any active node** (public or confidential) can **VALIDATE** task execution results.
+   - Cryptographic signatures for confidential task validations (TEE-based, only confidential nodes can provide)
+   - Public task validations use direct parameters (no TEE signature, any active node can validate)
    - SHA256 chain proofs for data integrity
+   - Multi-validator consensus prevents single point of failure
 
 2. **Performance**
    - Event-driven architecture using Solana account subscriptions
@@ -90,8 +107,9 @@ The system follows a modular architecture with three main layers:
    - Only CIDs stored on-chain for data integrity
 
 3. **Node Layer**
-   - **Validator Nodes**: Run in TEE, validate tasks, determine payments
-   - **Compute Nodes**: Execute tasks using LLM, submit results
+   - **Public Nodes**: Standard nodes that can execute public tasks and validate any tasks/nodes
+   - **Confidential Nodes**: Run in TEE (Trusted Execution Environment), can execute both public and confidential tasks, and validate any tasks/nodes
+   - **Key Distinction**: Only confidential nodes can **CLAIM/EXECUTE** confidential tasks (TEE protection for private data). However, **any active node** (public or confidential) can **VALIDATE** task execution results and other public nodes.
 
 ### Key Design Decisions
 
@@ -101,7 +119,10 @@ The system follows a modular architecture with three main layers:
 
 3. **Separation of Concerns**: Task execution (Compute Nodes) is separate from validation (Validator Nodes)
 
-4. **TEE-Only Validation**: Only validators with proven TEE hardware can validate tasks and determine payments
+4. **Dual Validation System**: 
+   - **Confidential task validation**: Requires TEE signature (confidential validators)
+   - **Public task validation**: Uses direct parameters (any validator)
+   - Both require multi-validator consensus (`required_validations` threshold)
 
 5. **Vault-Per-Goal**: Each goal has its own vault SystemAccount PDA for isolated payment management
 
@@ -111,13 +132,15 @@ The system follows a modular architecture with three main layers:
 
 ### Data Flow
 
-1. **Goal Creation & Funding**: Owner creates goal → initializes vault → optional initial deposit → contributors add funds
+1. **Goal Creation & Funding**: Owner creates goal (public or confidential) → initializes vault → optional initial deposit → contributors add funds
 2. **Contribution Phase**: Contributors can deposit or withdraw at any time while goal is Active
 3. **Computing Phase**: Tasks execute while goal remains Active (funds continue to be available for withdrawals)
-4. **Task Execution**: Compute node claims task → executes with LLM → submits result
-5. **Payment**: Validator verifies result → transfers payment immediately to compute node treasury
-6. **Goal Completion**: Validator detects goal completion in submit_task_validation() → automatically processes refunds → goal returns to Ready (can be reused)
-7. **Refund Phase**: Automatic proportional refunds processed when goal completes or is cancelled, then goal returns to Ready
+4. **Task Execution**: 
+   - **Public goals**: Any active node can claim
+   - **Confidential goals**: Only confidential nodes can claim (TEE protection)
+   - Node executes task with LLM → submits result
+5. **Payment**: Multiple validators validate result → when threshold reached → transfers payment immediately to node treasury
+6. **Goal Completion**: Validator detects goal completion → when validation threshold reached → goal status set to Ready (can be reused)
 
 ## Architecture Specification
 
@@ -135,6 +158,7 @@ The NetworkConfig PDA stores:
 - `task_count`: Current number of tasks
 - `validator_node_count`: Current number of active validator nodes
 - `compute_node_count`: Current number of active compute nodes
+- `required_validations`: Number of validations required for consensus (for agents, nodes, and tasks)
 - `approved_code_measurements`: Vector of approved TEE code measurements (max 10)
   - Each entry contains: `measurement` (32 bytes) and `version` (semantic version: major.minor.patch)
   - Newest measurements are always at the beginning (index 0)
@@ -151,7 +175,7 @@ sequenceDiagram
     participant Auth as Authority
     participant DAC as Smart Contract
     
-    Auth->>DAC: initialize_network(cid_config, allocate_goals, allocate_tasks, approved_code_measurements)
+    Auth->>DAC: initialize_network(cid_config, allocate_goals, allocate_tasks, approved_code_measurements, required_validations)
     DAC->>DAC: Compute genesis_hash = SHA256("DAC_GENESIS")
     DAC->>DAC: Create NetworkConfig<br/>Set authority = authority<br/>Set genesis_hash = genesis_hash<br/>Set agent_count = 0<br/>goal_count = allocate_goals<br/>task_count = allocate_tasks<br/>Store approved_code_measurements
     
@@ -168,21 +192,27 @@ sequenceDiagram
 
 ### NodeInfo
 
-Per-node account that stores registration information, TEE attestation data, node status, and reward tracking. Each validator or compute node has its own NodeInfo account.
+Per-node account that stores registration information, TEE attestation data, node status, and reward tracking. Each node (public or confidential) has its own NodeInfo account.
 
 **Node Keypair Generation**: The `node_pubkey` is generated on the server where the node software is launched. Each node instance creates its own keypair for identification and signing operations.
+
+**Node Types:**
+- **Public**: Standard nodes that can execute public tasks and validate any tasks
+- **Confidential**: Nodes running in TEE (Trusted Execution Environment) for private data processing
 
 The NodeInfo PDA stores:
 - `owner`: Public key of the account that registered the node (can be different from node_pubkey)
 - `node_pubkey`: Public key of the node (generated on the server where node runs)
-- `node_type`: Type of node (Validator or Compute)
+- `node_type`: Type of node (Public or Confidential)
 - `status`: Current status of the node
-- `node_info_cid`: IPFS CID of node metadata (for compute nodes)
-- `code_measurement`: TEE code measurement (for validator nodes)
-- `tee_signing_pubkey`: TEE signing public key (for validator nodes)
+- `node_info_cid`: IPFS CID of node metadata (for nodes that execute tasks)
+- `code_measurement`: TEE code measurement (for confidential nodes only)
+- `tee_signing_pubkey`: TEE signing public key (for confidential nodes only)
 - `node_treasury`: Node treasury PDA address (SystemAccount for receiving payments)
 - `total_earned`: Cumulative SOL earned by the node
 - `total_tasks_completed`: Total number of tasks completed by this node
+- `approved_validators`: List of validators who approved this node (max 10)
+- `rejected_validators`: List of validators who rejected this node (max 10)
 - `bump`: NodeInfo PDA bump seed
 
 Seeds: `["node_info", node_pubkey]`
@@ -197,90 +227,92 @@ Seeds: `["node_treasury", node_info.key()]`
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PendingClaim: register_node()
-    PendingClaim --> AwaitingValidation: claim_compute_node()
-    PendingClaim --> Active: claim_validator_node()<br/>(TEE verified)
-    AwaitingValidation --> Active: validate_compute_node()<br/>(approved)
-    AwaitingValidation --> Rejected: validate_compute_node()<br/>(rejected)
+    [*] --> PendingClaim: register_node()<br/>(Public or Confidential)
+    PendingClaim --> AwaitingValidation: claim_compute_node()<br/>(Public nodes)
+    PendingClaim --> Active: claim_confidential_node()<br/>(Confidential nodes, TEE verified)
+    AwaitingValidation --> Active: validate_public_node()<br/>(approved, threshold reached)
+    AwaitingValidation --> Rejected: validate_public_node()<br/>(rejected)
     Active --> Disabled: (admin action)
     Rejected --> [*]
     Disabled --> [*]
 ```
 
-#### Sequence - Compute Node Registration
+#### Sequence - Public Node Registration
 
 ```mermaid
 sequenceDiagram
     participant Owner as Node Owner
-    participant CN as Compute Node<br/>(Server)
+    participant PN as Public Node<br/>(Server)
     participant RPC as RPC
     participant IPFS as IPFS
     participant DAC as Smart Contract
-    participant VN as Validator Node (TEE)
+    participant VN as Validator Node<br/>(Public or Confidential)
     
-    Note over CN: Node generates keypair on server<br/>node_pubkey = keypair.pubkey()
-    CN->>RPC: Subscribe to NodeInfo account changes<br/>(status = PendingClaim)
+    Note over PN: Node generates keypair on server<br/>node_pubkey = keypair.pubkey()
+    PN->>RPC: Subscribe to NodeInfo account changes<br/>(status = PendingClaim)
     VN->>RPC: Subscribe to NodeInfo account changes<br/>(status = AwaitingValidation)
     
-    Owner->>DAC: register_node(node_pubkey, ComputeNode)<br/>(owner signs, node_pubkey passed as param)
-    DAC->>DAC: Create NodeInfo<br/>owner = owner.key()<br/>node_pubkey = node_pubkey<br/>status = PendingClaim<br/>Increment compute_node_count
+    Owner->>DAC: register_node(node_pubkey, Public)<br/>(owner signs, node_pubkey passed as param)
+    DAC->>DAC: Create NodeInfo<br/>owner = owner.key()<br/>node_pubkey = node_pubkey<br/>node_type = Public<br/>status = PendingClaim
     
-    RPC->>CN: Notify NodeInfo status change<br/>(PendingClaim)
+    RPC->>PN: Notify NodeInfo status change<br/>(PendingClaim)
     
-    CN->>IPFS: Upload node metadata
-    IPFS->>CN: Return node_info_cid
-    CN->>DAC: claim_compute_node(node_info_cid)<br/>(compute_node signs with node_pubkey)
+    PN->>IPFS: Upload node metadata
+    IPFS->>PN: Return node_info_cid
+    PN->>DAC: claim_compute_node(node_info_cid)<br/>(public_node signs with node_pubkey)
     DAC->>DAC: Store node_info_cid<br/>Set status = AwaitingValidation
     
     RPC->>VN: Notify NodeInfo status change<br/>(AwaitingValidation)
     
-    VN->>DAC: Fetch node_info_cid from NodeInfo
-    DAC->>VN: Return node_info_cid
-    
-    VN->>IPFS: Fetch node metadata using CID
-    IPFS->>VN: Return node metadata
-    
-    VN->>CN: Request benchmark task
-    CN->>CN: Perform benchmark task
-    CN->>VN: Return benchmark results
-    
-    VN->>VN: Validate benchmark results<br/>Create message: ValidateComputeNodeMessage {<br/>  compute_node_pubkey,<br/>  approved<br/>}<br/>Sign message with TEE signing key
-    VN->>DAC: Transaction with:<br/>1. Ed25519 instruction (signature verification)<br/>2. validate_compute_node()<br/>(validator_node_pubkey signs transaction)
-    DAC->>DAC: Extract signature, pubkey, message from Ed25519 instruction<br/>Verify pubkey matches stored validator TEE signing pubkey<br/>Verify message.compute_node_pubkey matches compute_node<br/>Set status = Active (if approved) or Rejected
+    loop Multiple Validators (until threshold reached)
+        VN->>DAC: Fetch node_info_cid from NodeInfo
+        DAC->>VN: Return node_info_cid
+        
+        VN->>IPFS: Fetch node metadata using CID
+        IPFS->>VN: Return node metadata
+        
+        VN->>PN: Request benchmark task
+        PN->>PN: Perform benchmark task
+        PN->>VN: Return benchmark results
+        
+        VN->>VN: Validate benchmark results
+        VN->>DAC: validate_public_node(approved)<br/>(validator signs transaction)
+        DAC->>DAC: Add validator to node.approved_validators (if approved)<br/>or node.rejected_validators (if rejected)<br/>Check if threshold reached (using vector length)<br/>Set status = Active (if approved and threshold reached)
+    end
 ```
 
-#### Sequence - Validator Node Registration
+#### Sequence - Confidential Node Registration
 
 ```mermaid
 sequenceDiagram
     participant Owner as Node Owner
-    participant VN as Validator Node<br/>(Server)
+    participant CN as Confidential Node<br/>(Server)
     participant TEE as TEE Enclave
     participant DAC as Smart Contract
     participant Intel as Intel SGX
     
-    Note over VN: Node generates keypair on server<br/>node_pubkey = keypair.pubkey()
+    Note over CN: Node generates keypair on server<br/>node_pubkey = keypair.pubkey()
     
-    Owner->>DAC: register_node(node_pubkey, ValidatorNode)<br/>(owner signs, node_pubkey passed as param)
-    DAC->>DAC: Create NodeInfo<br/>owner = owner.key()<br/>node_pubkey = node_pubkey<br/>status = PendingClaim<br/>Increment validator_node_count
+    Owner->>DAC: register_node(node_pubkey, Confidential)<br/>(owner signs, node_pubkey passed as param)
+    DAC->>DAC: Create NodeInfo<br/>owner = owner.key()<br/>node_pubkey = node_pubkey<br/>node_type = Confidential<br/>status = PendingClaim
     
-    VN->>TEE: Request SGX quote
+    CN->>TEE: Request SGX quote
     TEE->>TEE: Generate TEE signing keypair (Ed25519)
     TEE->>TEE: Put node_pubkey[0..32] + tee_signing_pubkey[32..64] in report_data
     TEE->>Intel: Request certificate chain
     Intel->>TEE: Return QE cert + PCK cert
-    TEE->>VN: Return quote + certificate_chain
+    TEE->>CN: Return quote + certificate_chain
     
-    VN->>VN: Extract code_measurement (MRENCLAVE) from quote<br/>Extract tee_signing_pubkey from report_data
-    VN->>DAC: claim_validator_node(code_measurement, tee_signing_pubkey)<br/>(validator_node signs with node_pubkey)
-    DAC->>DAC: Verify code_measurement in approved_code_measurements<br/>Store code_measurement and tee_signing_pubkey<br/>Set status = Active
+    CN->>CN: Extract code_measurement (MRENCLAVE) from quote<br/>Extract tee_signing_pubkey from report_data
+    CN->>DAC: claim_confidential_node(code_measurement, tee_signing_pubkey)<br/>(confidential_node signs with node_pubkey)
+    DAC->>DAC: Verify code_measurement in approved_code_measurements<br/>Store code_measurement and tee_signing_pubkey<br/>Set status = Active<br/>Increment validator_node_count
     
-    Note over DAC: TODO: Full SGX quote verification<br/>(certificate chain, report_data validation)<br/>Currently simplified to code_measurement check
+    Note over DAC: Confidential nodes are self-approved<br/>TEE attestation is sufficient<br/>No multi-validator consensus needed
 ```
 
 ### Agent
 
-Agent account that stores configuration and memory state for AI agents. Agents must be validated by a validator node before becoming active.
+Agent account that stores configuration and memory state for AI agents. Agents must be validated by multiple validator nodes before becoming active.
 
 The Agent PDA stores:
 - `agent_slot_id`: Unique slot identifier for the agent
@@ -288,6 +320,8 @@ The Agent PDA stores:
 - `agent_config_cid`: IPFS CID of agent configuration
 - `agent_memory_cid`: IPFS CID of agent memory state
 - `status`: Current status of the agent
+- `approved_validators`: List of validators who approved this agent (max 10)
+- `rejected_validators`: List of validators who rejected this agent (max 10)
 - `bump`: Agent PDA bump seed
 
 Seeds: `["agent", network_config, agent_slot_id.to_le_bytes()]`
@@ -297,7 +331,7 @@ Seeds: `["agent", network_config, agent_slot_id.to_le_bytes()]`
 ```mermaid
 stateDiagram-v2
     [*] --> Pending: create_agent()
-    Pending --> Active: Validator validates<br/>agent_config_cid
+    Pending --> Active: Multiple validators validate<br/>(threshold reached)
     Active --> Inactive: (admin action)
     Inactive --> [*]
 ```
@@ -327,12 +361,13 @@ sequenceDiagram
     VN->>DAC: Get approved agent config CID
     VN->>VN: Verify agent_config_cid matches<br/>network approved config
     
-    alt Config Valid
-        VN->>DAC: validate_agent()
-        DAC->>DAC: Verify agent.status == Pending<br/>Set status = Active
-        Note over DAC: TODO: Add TEE signature verification<br/>and agent config validation
-    else Config Invalid
-        Note over VN: Rejection not yet implemented<br/>(will set status = Inactive)
+    loop Multiple Validators (until threshold reached)
+        alt Config Valid
+            VN->>DAC: validate_agent()
+            DAC->>DAC: Add validator to agent.approved_validators<br/>Check if threshold reached (using vector length)<br/>Set status = Active (if threshold reached)
+        else Config Invalid
+            Note over VN: Validator can reject (not yet implemented)
+        end
     end
 ```
 
@@ -351,9 +386,10 @@ The Goal PDA stores:
 - `current_iteration`: Current iteration count
 - `task_index_at_goal_start`: Task index when goal started
 - `task_index_at_goal_end`: Task index when goal ended
-- `chain_proof`: SHA256 chain proof for data integrity (chained from genesis, updated only after TEE validation)
+- `chain_proof`: SHA256 chain proof for data integrity (chained from genesis, updated only after validation)
 - `total_shares`: Total shares issued for this goal (share-based accounting)
 - `locked_for_tasks`: Total SOL locked for currently processing tasks (max cost locked when claimed, released after validation)
+- `is_confidential`: Whether this goal requires confidential (TEE) execution
 - `vault_bump`: Vault PDA bump seed
 - `bump`: Goal PDA bump seed
 
@@ -387,8 +423,7 @@ stateDiagram-v2
     [*] --> Ready: create_goal() or<br/>initialize_network()
     Ready --> Active: set_goal()<br/>initialize vault
     Active --> Active: contribute_to_goal()<br/>withdraw_from_goal()<br/>claim_task()<br/>submit_task_validation()
-    Active --> Ready: submit_task_validation()<br/>(goal complete detected)<br/>(automatic refunds processed)
-    Active --> Ready: cancel_goal()<br/>(owner cancels)<br/>(automatic full refunds processed)
+    Active --> Ready: submit_task_validation()<br/>(goal complete detected)
     Ready --> Ready: (goal can be reused)
 ```
 
@@ -467,34 +502,9 @@ sequenceDiagram
     Note over Goal: Share price automatically decreases as<br/>vault balance decreases (tasks paid)
     
     alt Goal Completed (detected in submit_task_validation)
-        DAC->>Goal: Process automatic refunds<br/>status = Ready<br/>(goal can be reused)
+        DAC->>Goal: Set status = Ready<br/>(goal can be reused)
         
-        Note over C,Vault: Automatic refunds to all contributors
-        
-        DAC->>DAC: Calculate share_price = vault.lamports() / goal.total_shares
-        
-        loop For each contributor with shares > 0
-            DAC->>DAC: refund = contribution.shares × share_price
-            Vault->>C: Transfer refund automatically
-            DAC->>Contrib: refund_amount = refund<br/>shares = 0
-        end
-        
-        DAC->>Goal: total_shares = 0
-        
-    else Goal Cancelled
-        DAC->>Goal: cancel_goal()<br/>status = Ready<br/>(goal can be reused)
-        
-        Note over C,Vault: Automatic refunds to all contributors (based on current share value)
-        
-        DAC->>DAC: Calculate share_price = vault.lamports() / goal.total_shares
-        
-        loop For each contributor with shares > 0
-            DAC->>DAC: refund = contribution.shares × share_price
-            Vault->>C: Transfer refund automatically
-            DAC->>Contrib: refund_amount = refund<br/>shares = 0
-        end
-        
-        DAC->>Goal: total_shares = 0
+        Note over C,Vault: Contributors can withdraw manually<br/>using withdraw_from_goal()
     end
 ```
 
@@ -507,14 +517,17 @@ The Task PDA stores:
 - `action_type`: Type of action (e.g., LLM)
 - `agent`: Associated agent public key
 - `status`: Current status of the task
-- `compute_node`: Compute node assigned to the task (optional)
+- `compute_node`: Node assigned to the task (optional)
 - `input_cid`: IPFS CID of last validated task input data (used in chain_proof)
 - `output_cid`: IPFS CID of last validated task output data (used in chain_proof)
 - `pending_input_cid`: IPFS CID of task input data awaiting validation (optional)
 - `pending_output_cid`: IPFS CID of task output data awaiting validation (optional)
-- `chain_proof`: SHA256 chain proof for validation (chained from genesis, updated only after TEE validation)
+- `next_input_cid`: IPFS CID of input for next iteration (optional)
+- `chain_proof`: SHA256 chain proof for validation (chained from genesis, updated only after validation)
 - `execution_count`: Number of times task has been executed (includes both validated and rejected attempts, used in chain_proof for unique audit trail)
 - `max_task_cost`: Maximum cost locked when task is claimed (actual cost determined at validation)
+- `approved_validators`: List of validators who approved this task execution (max 10)
+- `rejected_validators`: List of validators who rejected this task execution (max 10)
 - `bump`: Task PDA bump seed
 
 **Note:** When a task is claimed, `max_task_cost` is locked. When validated, the actual payment amount (which may be less) is paid to the compute node, and the max lock is released.
@@ -527,7 +540,7 @@ Seeds: `["task", network_config, task_slot_id.to_le_bytes()]`
 stateDiagram-v2
     [*] --> Ready: create_task() or<br/>initialize_network()
     Ready --> Pending: set_goal()<br/>(task assigned to goal,<br/>status = Pending, agent set, action_type = Llm)
-    Pending --> Processing: claim_task(compute_node, max_task_cost)<br/>(locks max_task_cost)
+    Pending --> Processing: claim_task(max_task_cost)<br/>(locks max_task_cost)
     Processing --> AwaitingValidation: submit_task_result(output_cid)
     AwaitingValidation --> Pending: submit_task_validation()<br/>(approved, goal not complete)<br/>(lock released)
     AwaitingValidation --> Ready: submit_task_validation()<br/>(rejected)<br/>(lock released, clear pending)
@@ -552,9 +565,9 @@ sequenceDiagram
     
     RPC->>CN: Notify Task status change<br/>(Pending)
     
-    CN->>DAC: claim_task(compute_node, max_task_cost)
-    DAC->>DAC: Verify goal.total_shares > 0 (has contributors)<br/>Verify vault.lamports() - goal.locked_for_tasks >= max_task_cost<br/>(available balance sufficient)
-    DAC->>DAC: Lock max_task_cost: goal.locked_for_tasks += max_task_cost<br/>Set task.max_task_cost = max_task_cost<br/>Set compute_node<br/>Set status = Processing
+    CN->>DAC: claim_task(max_task_cost)
+    DAC->>DAC: Verify node_info.status == Active<br/>If goal.is_confidential: Verify node_info.node_type == Confidential<br/>Verify goal.total_shares > 0 (has contributors)<br/>Verify vault.lamports() - goal.locked_for_tasks - rent >= max_task_cost<br/>(available balance sufficient)
+    DAC->>DAC: Lock max_task_cost: goal.locked_for_tasks += max_task_cost<br/>Set task.max_task_cost = max_task_cost<br/>Set task.compute_node = node.key()<br/>Set status = Processing<br/>Increment task.execution_count<br/>Reset task.approved_validators = []<br/>Reset task.rejected_validators = []
     Note over DAC: Max cost locked - share price automatically decreases<br/>(locked funds excluded from share price calculation)<br/>Lock released when task validated or fails
     
     CN->>DAC: Fetch task context:<br/>- goal.specification_cid<br/>- agent.agent_config_cid<br/>- agent.agent_memory_cid<br/>- task.input_cid (validated) or pending_input_cid
@@ -579,28 +592,34 @@ sequenceDiagram
     
     RPC->>VN: Notify Task status change<br/>(AwaitingValidation)
     
-    VN->>IPFS: Fetch pending_input_cid and pending_output_cid
-    IPFS->>VN: Return input and output data
-    VN->>VN: Recompute partial execution<br/>Compute validation_proof = SHA256(pending_input_cid + pending_output_cid)<br/>Determine payment_amount<br/>Determine goal_completed (based on llm output)<br/>Sign validation with TEE signing key
-    VN->>DAC: submit_task_validation(goal_id, task_cid, payment_amount, validation_proof, tee_signature)
-    DAC->>DAC: Verify TEE signature<br/>Verify validation_proof == SHA256(pending_input_cid + pending_output_cid)<br/>Verify goal.status == Active
+    loop Multiple Validators (until threshold reached)
+        alt Goal is Confidential
+            VN->>IPFS: Fetch pending_input_cid and pending_output_cid
+            IPFS->>VN: Return input and output data
+            VN->>VN: Recompute partial execution<br/>Compute validation_proof = SHA256(pending_input_cid + pending_output_cid)<br/>Determine payment_amount<br/>Determine goal_completed (based on llm output)<br/>Create message: SubmitTaskValidationMessage {<br/>  goal_id, task_slot_id, payment_amount,<br/>  validation_proof, approved, goal_completed<br/>}<br/>Sign message with TEE signing key
+            VN->>DAC: Transaction with:<br/>1. Ed25519 instruction (signature verification)<br/>2. submit_confidential_task_validation()
+            DAC->>DAC: Verify TEE signature<br/>Add validator to task.approved_validators (if approved)<br/>or task.rejected_validators (if rejected)<br/>Check if threshold reached (using vector length)
+        else Goal is Public
+            VN->>IPFS: Fetch pending_input_cid and pending_output_cid
+            IPFS->>VN: Return input and output data
+            VN->>VN: Review task execution<br/>Determine payment_amount<br/>Determine approved<br/>Determine goal_completed
+            VN->>DAC: submit_public_task_validation(payment_amount, approved, goal_completed)
+            DAC->>DAC: Add validator to task.approved_validators (if approved)<br/>or task.rejected_validators (if rejected)<br/>Check if threshold reached (using vector length)
+        end
+    end
     
-    alt Validation Approved
-        DAC->>DAC: Update task chain_proof = SHA256(old_chain_proof + input_cid + output_cid + execution_count)<br/>(uses previous validated input_cid/output_cid)<br/>Move pending to validated: input_cid = pending_input_cid, output_cid = pending_output_cid<br/>Clear pending values<br/>Update goal chain_proof = SHA256(old_goal_proof + task_chain_proof + task_id + iteration)<br/>Release lock: goal.locked_for_tasks -= task.max_task_cost<br/>Transfer payment: vault → node_treasury (payment_amount)<br/>Update node.total_earned += payment_amount<br/>Increment node.total_tasks_completed<br/>Update goal.current_iteration++
+    alt Validation Threshold Reached
+        DAC->>DAC: Update task chain_proof = SHA256(old_chain_proof + input_cid + output_cid + execution_count)<br/>(uses previous validated input_cid/output_cid)<br/>Move pending to validated: input_cid = pending_input_cid, output_cid = pending_output_cid<br/>Clear pending values<br/>Update goal chain_proof = SHA256(old_goal_proof + task_chain_proof + task_id + iteration)<br/>Release lock: goal.locked_for_tasks -= task.max_task_cost<br/>Transfer payment: vault → node_treasury (payment_amount)<br/>Update node_info.total_earned += payment_amount<br/>Increment node_info.total_tasks_completed<br/>Update goal.current_iteration++
         
         Note over DAC: Share price automatically drops!<br/>Vault decreased by payment_amount
         
-        alt Goal Complete (detected by validator)
-            DAC->>DAC: Calculate share_price = vault / total_shares<br/>Process automatic refunds<br/>status = Ready<br/>(goal can be reused)
-            loop For each contributor with shares > 0
-                DAC->>DAC: Calculate refund = shares × share_price
-                Vault->>Contributor: Transfer refund automatically
-                DAC->>Contrib: refund_amount = refund<br/>shares = 0
-            end
-            DAC->>DAC: total_shares = 0
+        alt Goal Complete (message.goal_completed == true)
+            DAC->>DAC: Set goal.status = Ready<br/>(goal can be reused)
+        else Goal Not Complete
+            DAC->>DAC: Set task.status = Pending<br/>(task ready for next iteration)
         end
-    else Validation Rejected
-        DAC->>DAC: Release lock: goal.locked_for_tasks -= task.max_task_cost<br/>Set task.status = Ready<br/>(vault unchanged, share price returns to previous value)
+    else Validation Rejected (message.approved == false)
+        DAC->>DAC: Release lock: goal.locked_for_tasks -= task.max_task_cost<br/>Clear pending: pending_input_cid = None, pending_output_cid = None<br/>Set task.status = Ready<br/>(vault unchanged, share price returns to previous value)
     end
 ```
 
@@ -612,7 +631,7 @@ The DAC payment system implements a three-phase lifecycle with granular contribu
 
 1. **Contribution Phase (Active)**: Contributors deposit funds, can withdraw at any time
 2. **Computing Phase (Active)**: Tasks executing, rewards distributing, withdrawals still allowed
-3. **Refund Phase (Active → Ready)**: Automatic proportional refunds processed when goal completes or is cancelled, then goal returns to Ready for reuse
+3. **Goal Completion (Active → Ready)**: Goal status set to Ready when validator detects completion, allowing goal reuse
 
 ### Payment Sequence - Complete Flow
 
@@ -656,27 +675,15 @@ sequenceDiagram
             CN->>CN: Execute task with LLM
             CN->>DAC: submit_task_result()
             
-            VN->>VN: Validate task in TEE
-            VN->>DAC: submit_task_validation(goal_id, task_cid, payment_amount, proof, signature)
-            DAC->>DAC: Verify signature & proof<br/>Release lock: locked_for_tasks -= max_task_cost<br/>Transfer payment: vault → node_treasury (payment_amount)<br/>Update node.total_earned += payment_amount
+            VN->>VN: Validate task in TEE<br/>Create SubmitTaskValidationMessage<br/>Sign with TEE signing key
+            VN->>DAC: Transaction with Ed25519 instruction + submit_task_validation()
+            DAC->>DAC: Verify TEE signature & message<br/>Release lock: locked_for_tasks -= max_task_cost<br/>Transfer payment: vault → node_treasury (payment_amount)<br/>Update compute_node_info.total_earned += payment_amount
             
             Note over DAC: Share price automatically drops!<br/>Vault decreased by payment_amount
         end
         
-        Note over DAC: Goal completion detected automatically<br/>in submit_task_validation()
-        DAC->>DAC: Process automatic refunds<br/>status = Ready<br/>(goal can be reused)
-        
-        Note over DAC: Automatic refund processing
-        
-        DAC->>DAC: Calculate share_price = vault / total_shares
-        
-        loop For each contributor with shares > 0
-            DAC->>DAC: Calculate refund = contribution.shares × share_price
-            Vault->>Contributor: Transfer refund automatically
-            DAC->>Contrib: refund_amount = refund<br/>shares = 0
-        end
-        
-        DAC->>DAC: total_shares = 0 (all tokens burned)
+        Note over DAC: Goal completion detected automatically<br/>in submit_task_validation() via message.goal_completed
+        DAC->>DAC: Set goal.status = Ready<br/>(goal can be reused, contributors can withdraw manually)
         
     end
     
@@ -742,20 +749,29 @@ When tasks are paid, the vault balance decreases, causing the share price to dro
 
 ### Payment Mechanism
 
-Compute nodes are paid immediately when their tasks are validated. Here's how it works:
+Nodes are paid immediately when their tasks reach validation threshold. Here's how it works:
 
 **The Process:**
 
-1. **Task Validation**: When a validator validates a completed task, they determine the payment amount based on the task execution quality and cost.
+1. **Task Validation**: Multiple validators validate a completed task:
+   - **Confidential goals**: Validators use TEE signatures (Ed25519 instruction)
+   - **Public goals**: Validators provide direct parameters (payment_amount, approved, goal_completed)
+   - Each validator adds to `task.approved_validators` (if approved) or `task.rejected_validators` (if rejected)
 
-2. **Immediate Payment**: The payment amount is transferred immediately from the goal vault to the compute node's treasury account.
+2. **Threshold Check**: When `task.approved_validators.len() >= network_config.required_validations` (for approval) or `task.rejected_validators.len() >= network_config.required_validations` (for rejection):
+   - Task result is processed (approved or rejected)
+   - Payment is transferred immediately from goal vault to node treasury
 
-3. **Tracking**: The node's `total_earned` counter is updated with the payment amount, and `total_tasks_completed` is incremented.
+3. **Immediate Payment**: The payment amount is transferred immediately when threshold is reached
+
+4. **Tracking**: The node's `total_earned` counter is updated with the payment amount, and `total_tasks_completed` is incremented
 
 **Benefits:**
-- **Immediate Payment**: Compute nodes receive payment as soon as their work is validated
+- **Multi-Validator Consensus**: Requires multiple validators before payment (prevents single point of failure)
+- **Immediate Payment**: Nodes receive payment as soon as validation threshold is reached
 - **Simple**: No batching or accumulation logic needed
 - **Transparent**: All payments are tracked in account state for auditing
+- **Flexible Validation**: Public goals use simpler validation (no TEE), confidential goals use TEE signatures
 
 ### Cancel Goal Flow
 
@@ -790,20 +806,22 @@ sequenceDiagram
 ## Security Considerations
 
 ### TEE Attestation
-- **Validators** must provide valid Intel SGX attestation quotes during registration
-- **Code Measurement Whitelist**: Only approved MRENCLAVE values can register as validators
+- **Confidential Nodes** must provide valid Intel SGX attestation quotes during registration
+- **Code Measurement Whitelist**: Only approved MRENCLAVE values can register as confidential nodes
 - **Certificate Chain Verification**: Full chain validation from Intel Root CA to quote
+- **Public Nodes**: No TEE required, validated through benchmark testing by multiple validators
 
 
 ### Data Integrity
 - **Hash Chain System**: SHA256 chain proofs provide tamper-proof execution history
   - All chains start from `genesis_hash` (created during network initialization)
-  - Task chain: Updated only after TEE validation: `SHA256(old_chain_proof + input_cid + output_cid + execution_count)` (uses previous validated input_cid/output_cid, then moves pending to validated)
+  - Task chain: Updated only after validation threshold reached: `SHA256(old_chain_proof + input_cid + output_cid + execution_count)` (uses previous validated input_cid/output_cid, then moves pending to validated)
   - Goal chain: Updated when validated task completes: `SHA256(old_goal_proof + task_chain_proof + task_id + iteration)`
   - Chains continue across reuses - full execution history preserved
   - Off-chain audit: Start from genesis_hash, walk through all validated executions, recompute and verify
 - **IPFS CIDs**: Content-addressed storage ensures data immutability
 - **On-Chain State**: Only critical state and chain proofs stored on-chain
+- **Multi-Validator Consensus**: Tasks require `required_validations` threshold before processing, preventing single point of failure
 
 ### Access Control
 - Agent ownership enforced through Solana account ownership
@@ -835,9 +853,7 @@ sequenceDiagram
 - **Owner Verification**: Critical operations (cancel_goal) require owner signature
 - **Automatic Transitions**: 
   - Goal remains Active during task execution
-  - Goal transitions from Active → Ready automatically in submit_task_validation() when goal completion is detected (after refunds processed)
-- **Contributor Verification**: Refund processing verifies contributor matches contribution.contributor (automatic refunds)
-- **Automatic Refunds**: Refunds processed automatically in submit_task_validation() (on goal completion) and cancel_goal(), preventing manual claiming errors
+  - Goal transitions from Active → Ready automatically in submit_task_validation() when goal completion is detected
 
 #### Payment Security
 - **Fund Locking**: Tasks lock funds on claim (`goal.locked_for_tasks`), preventing withdrawal until validation completes
@@ -846,20 +862,21 @@ sequenceDiagram
 - **Immediate Payments**: Payments transferred immediately upon validation, with checked arithmetic to prevent overflow
 
 #### Cryptographic Signatures
-- **TEE-Generated Keys**: All validator operations signed using Ed25519 keypairs generated in TEE
-- **Ed25519 Instruction**: Required before `validate_compute_node`, extracts signature/pubkey/message via instructions sysvar
-- **Pubkey Verification**: Verifies signature created by validator's stored TEE signing pubkey (tamper-proof PDA storage)
-- **Message**: `ValidateComputeNodeMessage { compute_node_pubkey, approved }` - Borsh serialized (33 bytes)
+- **TEE-Generated Keys**: Confidential node operations signed using Ed25519 keypairs generated in TEE
+- **Ed25519 Instruction**: Required before `submit_confidential_task_validation`, extracts signature/pubkey/message via instructions sysvar
+- **Pubkey Verification**: Verifies signature created by confidential node's stored TEE signing pubkey (tamper-proof PDA storage)
+- **Message**: `SubmitTaskValidationMessage { goal_id, task_slot_id, payment_amount, validation_proof, approved, goal_completed }` - Borsh serialized
+- **Public Validation**: No TEE signature required, validators provide parameters directly
 
 
 #### Goal Status Transition Security
 - **Automatic Transitions**: 
   - Goal remains Active during task execution
-  - Active → Ready: Automatic in submit_task_validation() when validator detects goal completion (after refunds processed)
-  - Active → Ready: Automatic in cancel_goal() when owner cancels (after full refunds processed)
+  - Active → Ready: Automatic when validation threshold reached and validator detects goal completion
 - **Owner-Only Operations**: Only cancel_goal() requires owner signature
 - **Mitigation**: Owner-only operations verify `ctx.accounts.owner.key() == goal.owner`
 - **Status Guards**: Each instruction verifies correct status before allowing operation
-- **Validator Authority**: Only validators can trigger goal completion via submit_task_validation()
+- **Validator Authority**: Any active validator (public or confidential) can validate tasks
+- **Confidential Goal Protection**: Confidential goals can only be claimed by confidential nodes (TEE protection)
 
 

@@ -10,13 +10,15 @@ This document contains user stories and technical implementation details for all
 **So that** the network is ready for nodes, agents, and goals
 
 **Technical Implementation:**
-- **Instruction**: `initialize_network(cid_config, allocate_goals, allocate_tasks, approved_code_measurements)`
+- **Instruction**: `initialize_network(cid_config, allocate_goals, allocate_tasks, approved_code_measurements, required_validations)`
 - **Accounts**: Authority (signer, mut), NetworkConfig (init), SystemProgram
+- **Parameters**:
+  - `required_validations`: Number of validations required for consensus (applies to agents, nodes, and tasks)
 - **Actions**:
-  - Creates NetworkConfig PDA with authority, network config CID, and approved TEE code measurements
+  - Creates NetworkConfig PDA with authority, network config CID, approved TEE code measurements, and required_validations
   - Computes genesis_hash = SHA256("DAC_GENESIS")
-  - Pre-allocates goal accounts (status = Ready, chain_proof = genesis_hash)
-  - Pre-allocates task accounts (status = Ready, chain_proof = genesis_hash)
+  - Pre-allocates goal accounts (status = Ready, chain_proof = genesis_hash, is_confidential = false)
+  - Pre-allocates task accounts (status = Ready, chain_proof = genesis_hash, approved_validators = [], rejected_validators = [])
   - Initializes counters: agent_count = 0, goal_count = allocate_goals, task_count = allocate_tasks
   - Stores approved_code_measurements (max 10, newest at index 0)
 
@@ -25,42 +27,45 @@ This document contains user stories and technical implementation details for all
 ### User Story: Register a Node
 **As a** node operator  
 **I want to** register my node in the network  
-**So that** I can participate as either a validator or compute node
+**So that** I can participate as either a public or confidential node
 
 **Technical Implementation:**
 - **Instruction**: `register_node(node_pubkey, node_type)`
 - **Accounts**: NetworkConfig, NodeInfo (init), Node (signer), SystemProgram
+- **Parameters**:
+  - `node_type`: Either `Public` (standard node) or `Confidential` (TEE-enabled node)
 - **Actions**:
   - Creates NodeInfo PDA with status = PendingClaim
-  - Sets node_type (Validator or Compute)
-  - Node must then claim their role (compute or validator)
+  - Sets node_type (Public or Confidential)
+  - Initializes `approved_validators = []` and `rejected_validators = []`
+  - Node must then claim their role (compute node or confidential node)
 
 ### User Story: Claim Compute Node Role
-**As a** compute node operator  
+**As a** public node operator  
 **I want to** claim my compute node role with metadata  
 **So that** validators can validate my node and I can start accepting tasks
 
 **Technical Implementation:**
 - **Instruction**: `claim_compute_node(node_info_cid)`
-- **Accounts**: ComputeNode (signer, mut), NetworkConfig, NodeInfo (mut)
+- **Accounts**: Node (signer, mut), NetworkConfig, NodeInfo (mut)
 - **Guards**:
-  - `node_info.node_type == Compute`
   - `node_info.status == PendingClaim`
 - **Actions**:
   - Stores node_info_cid (IPFS CID of node metadata)
   - Sets status = AwaitingValidation
+  - **Note**: Works for both Public and Confidential nodes
   - Validators will then validate the node through benchmark testing
 
-### User Story: Claim Validator Node Role
-**As a** validator node operator  
-**I want to** claim my validator role with TEE attestation  
-**So that** I can validate tasks and compute nodes
+### User Story: Claim Confidential Node Role
+**As a** confidential node operator  
+**I want to** claim my confidential node role with TEE attestation  
+**So that** I can execute confidential tasks and validate any tasks
 
 **Technical Implementation:**
-- **Instruction**: `claim_validator_node(code_measurement, tee_signing_pubkey)`
-- **Accounts**: ValidatorNode (signer, mut), NetworkConfig (mut), NodeInfo (mut)
+- **Instruction**: `claim_confidential_node(code_measurement, tee_signing_pubkey)`
+- **Accounts**: ConfidentialNode (signer, mut), NetworkConfig (mut), NodeInfo (mut)
 - **Guards**:
-  - `node_info.node_type == Validator`
+  - `node_info.node_type == Confidential`
   - `node_info.status == PendingClaim`
   - `code_measurement` is in approved_code_measurements list
 - **Actions**:
@@ -68,32 +73,34 @@ This document contains user stories and technical implementation details for all
   - Stores tee_signing_pubkey (Ed25519 public key from TEE)
   - Sets status = Active
   - Increments network_config.validator_node_count
-  - Note: Full SGX attestation verification (certificate chain, quote parsing) should be implemented
+  - **Note**: Confidential nodes are self-approved (TEE attestation is sufficient)
+  - **Note**: Full SGX attestation verification (certificate chain, quote parsing) should be implemented
 
-### User Story: Validate Compute Node
-**As a** validator node operator  
-**I want to** validate a compute node after benchmark testing  
-**So that** only capable compute nodes can participate in the network
+### User Story: Validate Public Node
+**As a** node operator (public or confidential)  
+**I want to** validate a public node after benchmark testing  
+**So that** only capable nodes can participate in the network
 
 **Technical Implementation:**
-- **Instruction**: `validate_compute_node()` (no parameters - all data from Ed25519 instruction)
-- **Transaction Structure**: Must include Ed25519 signature verification instruction before `validate_compute_node`
-- **Message**: `ValidateComputeNodeMessage { compute_node_pubkey, approved }` signed with TEE signing key
-- **Accounts**: ValidatorNode (signer), NetworkConfig (mut), ValidatorNodeInfo, ComputeNodeInfo (mut), InstructionsSysvar
+- **Instruction**: `validate_public_node(approved: bool)`
+- **Accounts**: ValidatorNode (signer, mut), NetworkConfig (mut), ValidatorNodeInfo, NodeInfo (mut)
 - **Guards**:
   - `validator_node_info.status == Active`
-  - `validator_node_info.node_type == Validator`
-  - `compute_node_info.status == AwaitingValidation`
-  - Ed25519 instruction exists in transaction (previous instruction)
-  - TEE signing pubkey in Ed25519 instruction matches stored `validator_node_info.tee_signing_pubkey`
-  - Message `compute_node_pubkey` matches `compute_node_info.node_pubkey`
-  - Ed25519 program cryptographically verifies signature
+  - `validator_node_info.node_type == Public || validator_node_info.node_type == Confidential` (any active node can validate)
+  - `node_info.status == AwaitingValidation`
+  - `node_info.node_type == Public` (only public nodes need validation)
+  - Validator not already in `node_info.approved_validators` or `node_info.rejected_validators` lists
 - **Actions**:
-  - If `message.approved == true`:
-    - Sets `compute_node_info.status = Active`
+  - Adds validator to `node_info.approved_validators` list (if approved) or `node_info.rejected_validators` list (if rejected)
+  - Checks if `node_info.approved_validators.len() >= network_config.required_validations` (for approval) or `node_info.rejected_validators.len() >= network_config.required_validations` (for rejection)
+  - If `approved == true` and threshold reached:
+    - Sets `node_info.status = Active`
     - Increments `network_config.compute_node_count`
-  - If `message.approved == false`:
-    - Sets `compute_node_info.status = Rejected`
+  - If `approved == false`:
+    - Sets `node_info.status = Rejected`
+  - **Note**: Multiple validators must validate before node becomes Active (consensus)
+  - **Note**: **Any active node** (public or confidential) can validate public nodes
+  - **Note**: Confidential nodes are self-approved via TEE attestation (no validation needed)
 
 ## Agent Management
 
@@ -113,100 +120,176 @@ This document contains user stories and technical implementation details for all
   - Validators will then validate the agent configuration
 
 ### User Story: Validate an Agent
-**As a** validator node operator  
+**As a** node operator (public or confidential)  
 **I want to** validate an agent's configuration  
 **So that** only approved agents can execute tasks
 
 **Technical Implementation:**
 - **Instruction**: `validate_agent()`
-- **Accounts**: Validator (signer, mut), Agent (mut), NetworkConfig
+- **Accounts**: Validator (signer, mut), Agent (mut), ValidatorNodeInfo, NetworkConfig
 - **Guards**:
   - `agent.status == Pending`
+  - `validator_node_info.status == Active` (any active node can validate)
+  - Validator not already in `agent.approved_validators` or `agent.rejected_validators` lists
 - **Actions**:
-  - Sets agent.status = Active
-  - Note: For now, validation is simplified. TODO: Add TEE signature verification and agent config validation
+  - Adds validator to `agent.approved_validators` list
+  - Checks if `agent.approved_validators.len() >= network_config.required_validations`
+  - If threshold reached:
+    - Sets `agent.status = Active`
+  - **Note**: Multiple validators must validate before agent becomes Active (consensus)
+  - **Note**: **Any active node** (public or confidential) can validate agents
 
 ## Task Execution
 
 ### User Story: Claim a Task for Execution
-**As a** compute node operator  
+**As a** node operator  
 **I want to** claim a pending task  
 **So that** I can execute it and earn rewards
 
 **Technical Implementation:**
-- **Instruction**: `claim_task(compute_node, max_task_cost)`
-- **Accounts**: Task (mut), Goal (mut), Vault, ComputeNode (signer)
+- **Instruction**: `claim_task(max_task_cost)`
+- **Accounts**: Task (mut), Goal (mut), Vault (mut), Node (signer), NodeInfo, NetworkConfig
 - **Guards**: 
   - `task.status == Pending`
   - `goal.status == Active`
-  - `vault.lamports() - goal.locked_for_tasks >= max_task_cost` (available balance sufficient)
+  - `node_info.status == Active`
+  - **If `goal.is_confidential == true`**: `node_info.node_type == Confidential` (**ONLY confidential nodes can claim confidential tasks**)
+  - **If `goal.is_confidential == false`**: Any active node (public or confidential) can claim
+  - `vault.lamports() - goal.locked_for_tasks - rent_exempt_minimum >= max_task_cost` (available balance sufficient)
   - `max_task_cost > 0`
   - `goal.total_shares > 0` (ensures at least one contributor exists)
 - **Actions**:
-  - Verifies available vault balance (total - locked) is sufficient for maximum task cost
+  - Verifies available vault balance (total - locked - rent) is sufficient for maximum task cost
   - Locks maximum cost: `goal.locked_for_tasks += max_task_cost` (atomic with check)
   - Sets task.max_task_cost = max_task_cost
-  - Sets task.compute_node = compute_node
+  - Sets task.compute_node = node.key()
   - Sets task.status = Processing
   - Increments task.execution_count
+  - Resets task validation tracking: `task.approved_validators = []`, `task.rejected_validators = []`
   - Note: Locked funds cannot be withdrawn until task completes or fails
   - Note: Share price automatically decreases when funds are locked (excluded from available balance)
+  - **Note**: **Key distinction**: Only confidential nodes can **CLAIM/EXECUTE** confidential tasks (TEE protection for private data). However, **any active node** (public or confidential) can **VALIDATE** task execution results.
 
 ### User Story: Submit Task Execution Results
-**As a** compute node operator  
+**As a** node operator  
 **I want to** submit my task execution results  
 **So that** validators can verify and approve my work
 
 **Technical Implementation:**
-- **Instruction**: `submit_task_result(input_cid, output_cid)`
-- **Accounts**: Task (mut), ComputeNode (signer)
+- **Instruction**: `submit_task_result(input_cid, output_cid, next_input_cid)`
+- **Accounts**: Task (mut), Goal (mut), Node (signer), NetworkConfig
 - **Guards**:
   - `task.status == Processing`
-  - `task.compute_node == compute_node`
+  - `task.compute_node == Some(node.key())`
+  - `input_cid.len() <= 128`
+  - `output_cid.len() <= 128`
 - **Actions**:
-  - Stores input_cid and output_cid in `pending_input_cid` and `pending_output_cid`
+  - Stores input_cid, output_cid, and next_input_cid in `pending_input_cid`, `pending_output_cid`, and `next_input_cid`
   - Sets task.status = AwaitingValidation
   - Note: `input_cid`/`output_cid` (validated) are preserved for chain_proof calculation
-  - Note: chain_proof is NOT updated here - only after TEE validation
+  - Note: chain_proof is NOT updated here - only after validation threshold is reached
 
-### User Story: Validate Task Execution
-**As a** validator node operator  
-**I want to** validate task execution results  
-**So that** compute nodes get paid for correct work and goals progress
+### User Story: Validate Task Execution (Confidential Goal)
+**As a** node operator (public or confidential)  
+**I want to** validate confidential task execution results  
+**So that** nodes get paid for correct work and goals progress
 
 **Technical Implementation:**
-- **Instruction**: `submit_task_validation(goal_id, task_cid, payment_amount, validation_proof, tee_signature)`
-- **Accounts**: Goal (mut), Vault (mut), NodeInfo (mut), NodeTreasury (mut), Validator (signer)
+- **Instruction**: `submit_confidential_task_validation()` (no parameters - all data from Ed25519 instruction)
+- **Transaction Structure**: Must include Ed25519 signature verification instruction before `submit_confidential_task_validation`
+- **Message**: `SubmitTaskValidationMessage { goal_id, task_slot_id, payment_amount, validation_proof, approved, goal_completed }` signed with TEE signing key
+- **Accounts**: Goal (mut), Vault (mut), Task (mut), NodeInfo (mut), NodeTreasury (mut), ValidatorNodeInfo, Validator (signer), NetworkConfig, InstructionSysvar, SystemProgram
 - **Guards**: 
+  - `goal.is_confidential == true`
+  - `validator_node_info.status == Active`
+  - `validator_node_info.node_type == Confidential` (only confidential nodes can validate confidential tasks with TEE signature)
+  - `node_info.status == Active`
   - `goal.status == Active`
-  - `goal.goal_slot_id == goal_id`
+  - `task.status == AwaitingValidation`
+  - Validator not already in `task.approved_validators` or `task.rejected_validators` lists
+  - Ed25519 instruction exists in transaction (previous instruction)
+  - TEE signing pubkey in Ed25519 instruction matches stored `validator_node_info.tee_signing_pubkey`
+  - Message `goal_id` matches `goal.goal_slot_id`
+  - Message `task_slot_id` matches `task.task_slot_id`
+  - Message `validation_proof` matches `SHA256(pending_input_cid + pending_output_cid)`
+  - Message `payment_amount > 0`
+  - `vault.lamports() >= payment_amount`
+  - Ed25519 program cryptographically verifies signature
+- **Actions**:
+  - Extracts signature, pubkey, and message from Ed25519 instruction via instructions sysvar
+  - Verifies TEE signature and message integrity
+  - Verifies validation_proof matches expected proof (recomputed from pending_input_cid + pending_output_cid)
+  - Adds validator to `task.approved_validators` list (if approved) or `task.rejected_validators` list (if rejected)
+  - Checks if `task.approved_validators.len() >= network_config.required_validations` (for approval) or `task.rejected_validators.len() >= network_config.required_validations` (for rejection)
+  - **If threshold reached**:
+    - If `message.approved == true`:
+      - Updates task chain_proof: `SHA256(old_chain_proof + input_cid + output_cid + execution_count)`
+      - Moves pending to validated: `input_cid = pending_input_cid`, `output_cid = pending_output_cid`
+      - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
+      - Updates goal chain_proof: `SHA256(old_goal_proof + task_chain_proof + task_id + iteration)`
+      - Releases lock: `goal.locked_for_tasks -= task.max_task_cost`
+      - Transfers `message.payment_amount` from vault to node_treasury immediately
+      - Updates `node_info.total_earned += payment_amount`
+      - Increments `node_info.total_tasks_completed`
+      - Updates `goal.current_iteration++`
+      - **If `message.goal_completed == true`**:
+        - Sets `goal.status = Ready` (goal can be reused)
+      - Else:
+        - Sets `task.status = Pending` (task ready for next iteration)
+    - If `message.approved == false`:
+      - Releases lock: `goal.locked_for_tasks -= task.max_task_cost`
+      - Sets `task.status = Ready` (task can be retried)
+      - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
+  - **Note**: Multiple validators must validate before task result is processed (consensus)
+  - **Note**: Payment is transferred immediately when threshold is reached
+  - **Note**: Goal completion is detected automatically by validator
+  - **Note**: Confidential task validation requires TEE signature (only confidential nodes can provide this)
+
+### User Story: Validate Task Execution (Public Goal)
+**As a** node operator (public or confidential)  
+**I want to** validate public task execution results  
+**So that** nodes get paid for correct work and goals progress
+
+**Technical Implementation:**
+- **Instruction**: `submit_public_task_validation(payment_amount, approved, goal_completed)`
+- **Accounts**: Goal (mut), Vault (mut), Task (mut), NodeInfo (mut), NodeTreasury (mut), ValidatorNodeInfo, Validator (signer), NetworkConfig, SystemProgram
+- **Guards**: 
+  - `goal.is_confidential == false`
+  - `validator_node_info.status == Active`
+  - `validator_node_info.node_type == Public || validator_node_info.node_type == Confidential` (**any active node can validate public tasks**)
+  - `node_info.status == Active`
+  - `goal.status == Active`
+  - `task.status == AwaitingValidation`
+  - Validator not already in `task.approved_validators` or `task.rejected_validators` lists
   - `payment_amount > 0`
   - `vault.lamports() >= payment_amount`
 - **Actions**:
-  - Verifies TEE signature
-  - Verifies validation_proof matches expected proof (recomputed from pending_input_cid + pending_output_cid)
-  - Verifies task hasn't been validated before (prevents replay)
-  - If validation approved:
-    - Updates task chain_proof: `SHA256(old_chain_proof + input_cid + output_cid + execution_count)` (uses previous validated values)
-    - Moves pending to validated: `input_cid = pending_input_cid`, `output_cid = pending_output_cid`
-    - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
-    - Increments task.execution_count
-    - Updates goal chain_proof: `SHA256(old_goal_proof + task_chain_proof + task_id + iteration)`
-    - Releases lock: `goal.locked_for_tasks -= task.max_task_cost`
-    - Transfers payment_amount from vault to node_treasury immediately
-    - Updates node.total_earned += payment_amount
-    - Increments node.total_tasks_completed
-    - Updates goal.current_iteration
-    - **If goal is complete** (determined by validator based on LLM output):
-      - Sets goal.status = Ready (goal can be reused)
-  - If validation rejected:
-    - Releases lock: `goal.locked_for_tasks -= task.max_task_cost`
-    - Sets task.status = Ready (task can be retried)
-    - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
-    - Note: Validated input_cid/output_cid remain (used in chain_proof), but will be cleared when task is reused for new goal
-  - Note: Funds are locked at claim time, so payment is guaranteed if validation succeeds
-  - Note: Payment is transferred immediately on each validation
-  - Note: Goal completion is detected automatically by validator, no separate instruction needed
+  - Adds validator to `task.approved_validators` list (if approved) or `task.rejected_validators` list (if rejected)
+  - Checks if `task.approved_validators.len() >= network_config.required_validations` (for approval) or `task.rejected_validators.len() >= network_config.required_validations` (for rejection)
+  - **If threshold reached**:
+    - If `approved == true`:
+      - Updates task chain_proof: `SHA256(old_chain_proof + input_cid + output_cid + execution_count)`
+      - Moves pending to validated: `input_cid = pending_input_cid`, `output_cid = pending_output_cid`
+      - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
+      - Updates goal chain_proof: `SHA256(old_goal_proof + task_chain_proof + task_id + iteration)`
+      - Releases lock: `goal.locked_for_tasks -= task.max_task_cost`
+      - Transfers `payment_amount` from vault to node_treasury immediately
+      - Updates `node_info.total_earned += payment_amount`
+      - Increments `node_info.total_tasks_completed`
+      - Updates `goal.current_iteration++`
+      - **If `goal_completed == true`**:
+        - Sets `goal.status = Ready` (goal can be reused)
+      - Else:
+        - Sets `task.status = Pending` (task ready for next iteration)
+    - If `approved == false`:
+      - Releases lock: `goal.locked_for_tasks -= task.max_task_cost`
+      - Sets `task.status = Ready` (task can be retried)
+      - Clears pending: `pending_input_cid = None`, `pending_output_cid = None`
+  - **Note**: Multiple validators must validate before task result is processed (consensus)
+  - **Note**: No TEE signature required for public goals (direct parameters)
+  - **Note**: **Any active node** (public or confidential) can validate public task execution
+  - **Note**: Payment is transferred immediately when threshold is reached
+  - **Note**: Goal completion is determined by validator
 
 ## Payment & Contribution
 
@@ -216,17 +299,20 @@ This document contains user stories and technical implementation details for all
 **So that** I can later configure and fund it
 
 **Technical Implementation:**
-- **Instruction**: `create_goal(is_public: bool)`
+- **Instruction**: `create_goal(is_public: bool, is_confidential: bool)`
 - **Accounts**: Payer (signer, mut), Owner (signer, mut), NetworkConfig (mut), Goal (init), SystemProgram
 - **Parameters**:
   - `is_public`: If `true`, goal owner is set to `Pubkey::default()` (public, anyone can set this goal). If `false`, goal owner is set to the provided owner.
+  - `is_confidential`: If `true`, goal requires confidential (TEE) execution. Only confidential nodes can claim tasks for this goal.
 - **Actions**:
   - Creates Goal PDA with goal_slot_id = goal_count
   - Sets owner: `Pubkey::default()` if `is_public == true`, otherwise sets to `owner.key()`
+  - Sets `is_confidential` flag
   - Sets status = Ready
   - Sets chain_proof = genesis_hash (or continues from previous if reusing)
   - Increments network_config.goal_count
-  - Note: Goals can also be pre-allocated during network initialization
+  - **Note**: Confidential goals can only be claimed by confidential nodes (TEE protection)
+  - **Note**: Goals can also be pre-allocated during network initialization
 
 ### User Story: Initialize a Goal
 **As a** goal owner  
