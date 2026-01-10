@@ -100,7 +100,11 @@ impl<'info> ValidateComputeNode<'info> {
 
         require!(ed_data.len() >= 16, ErrorCode::InvalidInstructionSysvar);
 
-        let offsets: &Ed25519SignatureOffsets = from_bytes(&ed_data[2..16]);
+        let offsets: Ed25519SignatureOffsets = 
+            bytemuck::try_pod_read_unaligned(&ed_data[2..16])
+                .map_err(|_| error!(ErrorCode::InvalidInstructionSysvar))?;
+
+        msg!("offsets: {:?}", offsets);
 
         let pubkey_offset = offsets.public_key_offset as usize;
         let msg_offset = offsets.message_data_offset as usize;
