@@ -16,7 +16,7 @@ pub struct ValidateAgent<'info> {
     pub agent: Account<'info, Agent>,
 
     #[account(
-        seeds = [b"dac_network_config"],
+        seeds = [b"dac_network_config", network_config.authority.as_ref()],
         bump = network_config.bump,
     )]
     pub network_config: Account<'info, NetworkConfig>,

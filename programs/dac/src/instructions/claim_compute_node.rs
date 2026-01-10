@@ -9,7 +9,7 @@ pub struct ClaimComputeNode<'info> {
     pub compute_node: Signer<'info>,
 
     #[account(
-        seeds = [b"dac_network_config"],
+        seeds = [b"dac_network_config", network_config.authority.as_ref()],
         bump = network_config.bump,
     )]
     pub network_config: Account<'info, NetworkConfig>,

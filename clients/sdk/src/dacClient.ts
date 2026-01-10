@@ -24,6 +24,7 @@ import {
   getContributeToGoalInstructionAsync,
   getWithdrawFromGoalInstructionAsync,
   getRegisterNodeInstructionAsync,
+  getUpdateNetworkConfigInstructionAsync,
   type InitializeNetworkInput,
   type CreateAgentInput,
   type CreateGoalInput,
@@ -31,6 +32,7 @@ import {
   type ContributeToGoalAsyncInput,
   type WithdrawFromGoalAsyncInput,
   type RegisterNodeAsyncInput,
+  type UpdateNetworkConfigAsyncInput,
 } from './generated/dac/instructions/index.js';
 import type { NodeType } from './generated/dac/types/index.js';
 import {
@@ -70,13 +72,23 @@ import type { CodeMeasurementArgs } from './generated/dac/types/index.js';
  * ```
  */
 export class DacFrontendClient {
+  private authority: Address | null = null;
+
   constructor(
     private readonly client: SolanaClient,
     private readonly programAddress: Address = DAC_PROGRAM_ID
   ) {}
 
-  async getNetworkConfig(): Promise<NetworkConfig | null> {
-    const networkConfigAddress = await deriveNetworkConfigAddress(this.programAddress);
+  setAuthority(authority: Address): void {
+    this.authority = authority;
+  }
+
+  async getNetworkConfig(authority?: Address): Promise<NetworkConfig | null> {
+    const auth = authority || this.authority;
+    if (!auth) {
+      throw new Error('Authority is required. Either set it with setAuthority() or pass it as parameter.');
+    }
+    const networkConfigAddress = await deriveNetworkConfigAddress(this.programAddress, auth);
     const account = await fetchMaybeNetworkConfig(this.client.rpc, networkConfigAddress);
     return account.exists ? account.data : null;
   }
@@ -113,7 +125,8 @@ export class DacFrontendClient {
     approvedCodeMeasurements: CodeMeasurementArgs[];
   }): Promise<{ signature: string; networkConfigAddress: Address }> {
     const networkConfigAddress = await deriveNetworkConfigAddress(
-      this.programAddress
+      this.programAddress,
+      params.authority.address
     );
 
     const remainingAccounts: Address[] = [];
@@ -190,12 +203,13 @@ export class DacFrontendClient {
     networkConfig: Address;
     agentConfigCid: string;
   }): Promise<{ signature: string; agentAddress: Address; agentSlotId: bigint }> {
-    const networkConfigData = await this.getNetworkConfig();
-    if (!networkConfigData) {
+    // Fetch network config using the provided networkConfig address
+    const networkConfigAccount = await fetchMaybeNetworkConfig(this.client.rpc, params.networkConfig);
+    if (!networkConfigAccount.exists || !networkConfigAccount.data) {
       throw new Error('Network config not found');
     }
 
-    const agentSlotId = networkConfigData.agentCount;
+    const agentSlotId = networkConfigAccount.data.agentCount;
     const agentAddress = await deriveAgentAddress(
       this.programAddress,
       params.networkConfig,
@@ -323,5 +337,29 @@ export class DacFrontendClient {
     });
 
     return await sendTransaction(this.client, params.contributor, [instruction]);
+  }
+
+  async updateNetworkConfig(params: {
+    authority: TransactionSigner;
+    cidConfig?: string | null;
+    newCodeMeasurement?: CodeMeasurementArgs | null;
+  }): Promise<string> {
+    const networkConfigAddress = await deriveNetworkConfigAddress(
+      this.programAddress,
+      params.authority.address
+    );
+
+    const input: UpdateNetworkConfigAsyncInput = {
+      authority: params.authority,
+      networkConfig: networkConfigAddress,
+      cidConfig: params.cidConfig ?? null,
+      newCodeMeasurement: params.newCodeMeasurement ?? null,
+    };
+
+    const instruction = await getUpdateNetworkConfigInstructionAsync(input, {
+      programAddress: this.programAddress,
+    });
+
+    return await sendTransaction(this.client, params.authority, [instruction]);
   }
 }

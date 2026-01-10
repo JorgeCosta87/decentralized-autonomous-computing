@@ -1,5 +1,5 @@
 use dac_client::accounts::{Agent, Contribution, Goal, NetworkConfig, NodeInfo, Task};
-use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey};
+use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey, signature::Signer};
 
 use crate::setup::TestFixture;
 
@@ -31,7 +31,7 @@ pub trait Accounts {
 impl Accounts for TestFixture {
     fn find_network_config_pda(&self) -> (Pubkey, u8) {
         let (pda, bump) = Pubkey::find_program_address(
-            &[b"dac_network_config"],
+            &[b"dac_network_config", self.authority.pubkey().as_ref()],
             &self.program_id,
         );
         (pda, bump)

@@ -9,11 +9,15 @@ import {
 export const DAC_PROGRAM_ID = address('BaY9vp3RXAQugzAoBojkBEZs9fJKS4dNManN7vwDZSFh');
 
 export async function deriveNetworkConfigAddress(
-  programAddress: Address
+  programAddress: Address,
+  authority: Address
 ): Promise<Address> {
   const [networkConfigAddress] = await getProgramDerivedAddress({
     programAddress,
-    seeds: [Buffer.from('dac_network_config')],
+    seeds: [
+      Buffer.from('dac_network_config'),
+      getAddressEncoder().encode(authority),
+    ],
   });
   return networkConfigAddress;
 }

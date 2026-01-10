@@ -47,7 +47,8 @@ async function main() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   // Check if network is already initialized
-  const existingNetworkConfig = await dacClient.getNetworkConfig();
+  // For getNetworkConfig, we need authority - use the authority keypair's address
+  const existingNetworkConfig = await dacClient.getNetworkConfig(keypairs.authority.address);
   
   if (existingNetworkConfig) {
     console.log('✅ Network already initialized!');
@@ -91,7 +92,7 @@ async function main() {
       console.log(`  Network Config Address: ${networkConfigAddress}\n`);
 
       // Verify network config was created
-      const networkConfig = await dacClient.getNetworkConfig();
+      const networkConfig = await dacClient.getNetworkConfig(keypairs.authority.address);
       if (networkConfig) {
         console.log('✅ Network config fetched:');
         console.log(`  Agent Count: ${networkConfig.agentCount}`);
@@ -117,12 +118,12 @@ async function main() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   try {
-    const networkConfigData = await dacClient.getNetworkConfig();
+    const networkConfigData = await dacClient.getNetworkConfig(keypairs.authority.address);
     if (!networkConfigData) {
       throw new Error('Network config not found. Run initializeNetwork first.');
     }
 
-    const networkConfigAddr = await deriveNetworkConfigAddress(DAC_PROGRAM_ID);
+    const networkConfigAddr = await deriveNetworkConfigAddress(DAC_PROGRAM_ID, keypairs.authority.address);
 
     // Test registering a Compute node
     console.log('Checking Compute Node registration...');
@@ -178,6 +179,64 @@ async function main() {
     }
   } catch (error) {
     console.error('❌ Failed to register node:');
+    console.error(error);
+    process.exit(1);
+  }
+
+  // ============================================================================
+  // Test 3: Update Network Config
+  // ============================================================================
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('Test 3: Update Network Config');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  try {
+    // Test updating CID config
+    const newCidConfig = 'QmUpdatedConfigCID789';
+    console.log('Updating network config CID...');
+    const updateCidSignature = await dacClient.updateNetworkConfig({
+      authority: keypairs.authority,
+      cidConfig: newCidConfig,
+    });
+    console.log('✅ Network config CID updated successfully!');
+    console.log(`  Transaction Signature: ${updateCidSignature}\n`);
+
+    // Verify CID was updated
+    const updatedNetworkConfig = await dacClient.getNetworkConfig(keypairs.authority.address);
+    if (updatedNetworkConfig) {
+      console.log('✅ Verified CID update:');
+      console.log(`  New CID Config: ${updatedNetworkConfig.cidConfig}\n`);
+    }
+
+    const newCodeMeasurement = {
+      measurement: new Uint8Array([
+        229, 58, 231, 48, 0, 103, 31, 222, 162, 242, 225, 237, 113, 102, 105, 80,
+        150, 168, 167, 186, 161, 187, 226, 22, 159, 58, 36, 194, 139, 99, 115, 84
+      ]),
+      version: { major: 1, minor: 0, patch: 0 },
+    };
+
+    console.log('Adding new code measurement...');
+    const updateMeasurementSignature = await dacClient.updateNetworkConfig({
+      authority: keypairs.authority,
+      newCodeMeasurement: newCodeMeasurement,
+    });
+    console.log('✅ Code measurement added successfully!');
+    console.log(`  Transaction Signature: ${updateMeasurementSignature}\n`);
+
+    // Verify measurement was added
+    const finalNetworkConfig = await dacClient.getNetworkConfig(keypairs.authority.address);
+    if (finalNetworkConfig) {
+      console.log('✅ Verified code measurement addition:');
+      console.log(`  Total Measurements: ${finalNetworkConfig.approvedCodeMeasurements.length}`);
+      if (finalNetworkConfig.approvedCodeMeasurements.length > 0) {
+        const latest = finalNetworkConfig.approvedCodeMeasurements[0];
+        console.log(`  Latest Measurement Version: ${latest.version.major}.${latest.version.minor}.${latest.version.patch}`);
+      }
+      console.log('');
+    }
+  } catch (error) {
+    console.error('❌ Failed to update network config:');
     console.error(error);
     process.exit(1);
   }

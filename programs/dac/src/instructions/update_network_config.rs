@@ -10,7 +10,7 @@ pub struct UpdateNetworkConfig<'info> {
 
     #[account(
         mut,
-        seeds = [b"dac_network_config"],
+        seeds = [b"dac_network_config", authority.key().as_ref()],
         bump = network_config.bump,
         constraint = network_config.authority == authority.key() @ ErrorCode::InvalidAuthority
     )]

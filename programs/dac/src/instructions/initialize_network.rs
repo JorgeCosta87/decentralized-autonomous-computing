@@ -15,7 +15,7 @@ pub struct InitializeNetwork<'info> {
         init,
         payer = authority,
         space = 8 + NetworkConfig::INIT_SPACE,
-        seeds = [b"dac_network_config"],
+        seeds = [b"dac_network_config", authority.key().as_ref()],
         bump,
     )]
     pub network_config: Account<'info, NetworkConfig>,
