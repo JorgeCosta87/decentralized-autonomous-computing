@@ -72,7 +72,7 @@ This document contains user stories and technical implementation details for all
   - Stores code_measurement (MRENCLAVE from SGX quote)
   - Stores tee_signing_pubkey (Ed25519 public key from TEE)
   - Sets status = Active
-  - Increments network_config.validator_node_count
+  - Increments network_config.confidential_node_count
   - **Note**: Confidential nodes are self-approved (TEE attestation is sufficient)
   - **Note**: Full SGX attestation verification (certificate chain, quote parsing) should be implemented
 
@@ -95,7 +95,7 @@ This document contains user stories and technical implementation details for all
   - Checks if `node_info.approved_validators.len() >= network_config.required_validations` (for approval) or `node_info.rejected_validators.len() >= network_config.required_validations` (for rejection)
   - If `approved == true` and threshold reached:
     - Sets `node_info.status = Active`
-    - Increments `network_config.compute_node_count`
+    - Increments `network_config.public_node_count`
   - If `approved == false`:
     - Sets `node_info.status = Rejected`
   - **Note**: Multiple validators must validate before node becomes Active (consensus)

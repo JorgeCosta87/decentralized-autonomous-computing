@@ -197,7 +197,7 @@ fn test_register_public_node() {
             assert_eq!(node_info.node_type, NodeType::Public);
             assert_eq!(node_info.status, NodeStatus::PendingClaim);
             assert_eq!(node_info.node_info_cid, None);
-            assert_eq!(network_config.compute_node_count, 0);
+            assert_eq!(network_config.public_node_count, 0);
         }
         Err(e) => panic!("Failed to register public node: {:#?}", e),
     }
@@ -226,7 +226,7 @@ fn test_register_confidential_node() {
             assert_eq!(node_info.node_type, NodeType::Confidential);
             assert_eq!(node_info.status, NodeStatus::PendingClaim);
             assert_eq!(node_info.code_measurement, None);
-            assert_eq!(network_config.validator_node_count, 0);
+            assert_eq!(network_config.confidential_node_count, 0);
         }
         Err(e) => panic!("Failed to register confidential node: {:#?}", e),
     }
@@ -253,7 +253,7 @@ fn test_claim_public_node() {
                 node_info.node_info_cid,
                 Some(DEFAULT_NODE_INFO_CID.to_string())
             );
-            assert_eq!(network_config.compute_node_count, 0);
+            assert_eq!(network_config.public_node_count, 0);
         }
         Err(e) => panic!("Failed to claim public node: {:#?}", e),
     }
@@ -282,7 +282,7 @@ fn test_claim_confidential_node() {
                 node_info.tee_signing_pubkey,
                 Some(fixt.tee_signing_keypair.pubkey())
             );
-            assert_eq!(network_config.validator_node_count, 1);
+            assert_eq!(network_config.confidential_node_count, 1);
         }
         Err(e) => panic!("Failed to claim confidential node: {:#?}", e),
     }
@@ -311,7 +311,7 @@ fn test_validate_public_node() {
             assert_eq!(node_info.status, NodeStatus::Active);
             assert_eq!(node_info.total_tasks_completed, 0);
             assert_eq!(node_info.total_earned, 0);
-            assert_eq!(network_config.compute_node_count, 1);
+            assert_eq!(network_config.public_node_count, 1);
         }
         Err(e) => panic!("Failed to validate public node: {:#?}", e),
     }

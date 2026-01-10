@@ -55,7 +55,7 @@ Existing AI agent systems face several critical challenges:
    - Each goal has an associated vault (SystemAccount PDA)
    - Granular contribution tracking per contributor
    - Contributors can deposit and withdraw at any time before goal completion
-   - Immediate payment to compute nodes upon task validation
+   - Immediate payment to nodes upon task validation
    - Proportional refund system based on when funds entered
    - Full refunds available on goal cancellation
    - Vault balance checks before computing phase transition
@@ -77,10 +77,10 @@ Existing AI agent systems face several critical challenges:
    - Event-driven architecture using Solana account subscriptions
    - Off-chain data storage (IPFS) to minimize on-chain state
    - Pre-allocated task slots to avoid repeated account creation
-   - Immediate payment to compute nodes upon task validation
+   - Immediate payment to nodes upon task validation
 
 3. **Scalability**
-   - Support for multiple validators and compute nodes
+   - Support for multiple nodes (public and confidential)
    - Configurable task and goal allocation limits
    - Reusable task accounts across goal iterations
 
@@ -117,7 +117,7 @@ The system follows a modular architecture with three main layers:
 
 2. **Event-Driven Architecture**: Nodes subscribe to Solana account changes for real-time notifications, eliminating polling
 
-3. **Separation of Concerns**: Task execution (Compute Nodes) is separate from validation (Validator Nodes)
+3. **Separation of Concerns**: Task execution and validation are separate operations (any active node can validate)
 
 4. **Dual Validation System**: 
    - **Confidential task validation**: Requires TEE signature (confidential validators)
@@ -126,7 +126,7 @@ The system follows a modular architecture with three main layers:
 
 5. **Vault-Per-Goal**: Each goal has its own vault SystemAccount PDA for isolated payment management
 
-6. **Immediate Payment**: Compute nodes are paid immediately upon task validation
+6. **Immediate Payment**: Nodes are paid immediately upon task validation
 
 7. **Proportional Refund System**: Contributors only pay for compute that occurred after their contribution, ensuring fair cost distribution
 
@@ -156,8 +156,8 @@ The NetworkConfig PDA stores:
 - `agent_count`: Current number of registered agents
 - `goal_count`: Current number of goals
 - `task_count`: Current number of tasks
-- `validator_node_count`: Current number of active validator nodes
-- `compute_node_count`: Current number of active compute nodes
+- `confidential_node_count`: Current number of active confidential nodes (TEE-enabled)
+- `public_node_count`: Current number of active public nodes
 - `required_validations`: Number of validations required for consensus (for agents, nodes, and tasks)
 - `approved_code_measurements`: Vector of approved TEE code measurements (max 10)
   - Each entry contains: `measurement` (32 bytes) and `version` (semantic version: major.minor.patch)
@@ -246,7 +246,7 @@ sequenceDiagram
     participant RPC as RPC
     participant IPFS as IPFS
     participant DAC as Smart Contract
-    participant VN as Validator Node<br/>(Public or Confidential)
+    participant VN as Validator Node<br/>(Any Active Node: Public or Confidential)
     
     Note over PN: Node generates keypair on server<br/>node_pubkey = keypair.pubkey()
     PN->>RPC: Subscribe to NodeInfo account changes<br/>(status = PendingClaim)
@@ -305,14 +305,14 @@ sequenceDiagram
     
     CN->>CN: Extract code_measurement (MRENCLAVE) from quote<br/>Extract tee_signing_pubkey from report_data
     CN->>DAC: claim_confidential_node(code_measurement, tee_signing_pubkey)<br/>(confidential_node signs with node_pubkey)
-    DAC->>DAC: Verify code_measurement in approved_code_measurements<br/>Store code_measurement and tee_signing_pubkey<br/>Set status = Active<br/>Increment validator_node_count
+    DAC->>DAC: Verify code_measurement in approved_code_measurements<br/>Store code_measurement and tee_signing_pubkey<br/>Set status = Active<br/>Increment confidential_node_count
     
     Note over DAC: Confidential nodes are self-approved<br/>TEE attestation is sufficient<br/>No multi-validator consensus needed
 ```
 
 ### Agent
 
-Agent account that stores configuration and memory state for AI agents. Agents must be validated by multiple validator nodes before becoming active.
+Agent account that stores configuration and memory state for AI agents. Agents must be validated by multiple active nodes (public or confidential) before becoming active.
 
 The Agent PDA stores:
 - `agent_slot_id`: Unique slot identifier for the agent
@@ -344,7 +344,7 @@ sequenceDiagram
     participant IPFS as IPFS
     participant DAC as Smart Contract
     participant RPC as RPC
-    participant VN as Validator Node
+    participant VN as Validator Node<br/>(Any Active Node: Public or Confidential)
     participant TEE as TEE Enclave
     
     Owner->>IPFS: Upload agent config
@@ -530,7 +530,7 @@ The Task PDA stores:
 - `rejected_validators`: List of validators who rejected this task execution (max 10)
 - `bump`: Task PDA bump seed
 
-**Note:** When a task is claimed, `max_task_cost` is locked. When validated, the actual payment amount (which may be less) is paid to the compute node, and the max lock is released.
+**Note:** When a task is claimed, `max_task_cost` is locked. When validated, the actual payment amount (which may be less) is paid to the node that executed the task, and the max lock is released.
 
 Seeds: `["task", network_config, task_slot_id.to_le_bytes()]`
 
@@ -551,12 +551,12 @@ stateDiagram-v2
 
 ```mermaid
 sequenceDiagram
-    participant CN as Compute Node
+    participant CN as Node<br/>(Public or Confidential)
     participant DAC as Smart Contract
     participant IPFS as IPFS
     participant RPC as RPC
     participant LLM as LLM
-    participant VN as Validator Node (TEE)
+    participant VN as Validator Node<br/>(Any Active Node: Public or Confidential)
     
     CN->>RPC: Subscribe to Task account changes<br/>(status = Pending)
     VN->>RPC: Subscribe to Task status changes<br/>(AwaitingValidation)
@@ -641,8 +641,8 @@ sequenceDiagram
     participant Contributor as Contributor
     participant DAC as Smart Contract
     participant Vault as Goal Vault
-    participant VN as Validator Node
-    participant CN as Compute Node
+    participant VN as Validator Node<br/>(Any Active Node: Public or Confidential)
+    participant CN as Node<br/>(Public or Confidential)
     participant NodeTreasury as Node Treasury
     
     rect rgb(200, 230, 255)
@@ -675,11 +675,20 @@ sequenceDiagram
             CN->>CN: Execute task with LLM
             CN->>DAC: submit_task_result()
             
-            VN->>VN: Validate task in TEE<br/>Create SubmitTaskValidationMessage<br/>Sign with TEE signing key
-            VN->>DAC: Transaction with Ed25519 instruction + submit_task_validation()
-            DAC->>DAC: Verify TEE signature & message<br/>Release lock: locked_for_tasks -= max_task_cost<br/>Transfer payment: vault → node_treasury (payment_amount)<br/>Update compute_node_info.total_earned += payment_amount
+            alt Goal is Confidential
+                VN->>VN: Validate task in TEE<br/>Create SubmitTaskValidationMessage<br/>Sign with TEE signing key
+                VN->>DAC: Transaction with Ed25519 instruction + submit_confidential_task_validation()
+                DAC->>DAC: Verify TEE signature & message<br/>Add validator to task.approved_validators<br/>Check if threshold reached
+            else Goal is Public
+                VN->>VN: Review task execution<br/>Determine payment_amount, approved, goal_completed
+                VN->>DAC: submit_public_task_validation(payment_amount, approved, goal_completed)
+                DAC->>DAC: Add validator to task.approved_validators<br/>Check if threshold reached
+            end
             
-            Note over DAC: Share price automatically drops!<br/>Vault decreased by payment_amount
+            alt Validation Threshold Reached
+                DAC->>DAC: Release lock: locked_for_tasks -= max_task_cost<br/>Transfer payment: vault → node_treasury (payment_amount)<br/>Update node_info.total_earned += payment_amount<br/>Increment node_info.total_tasks_completed
+                Note over DAC: Share price automatically drops!<br/>Vault decreased by payment_amount
+            end
         end
         
         Note over DAC: Goal completion detected automatically<br/>in submit_task_validation() via message.goal_completed
@@ -725,7 +734,7 @@ When tasks are paid, the vault balance decreases, causing the share price to dro
 - Total shares: 150
 
 **Step 3: Tasks Execute, Cost 30 SOL**
-- Vault: 150 → 120 SOL (30 paid to compute nodes)
+- Vault: 150 → 120 SOL (30 paid to nodes)
 - Total shares: 150 (unchanged)
 - **New share price: 120 / 150 = 0.8 SOL/share**
 - Alice's shares value: 100 × 0.8 = 80 SOL (paid 20 SOL)
@@ -825,7 +834,7 @@ sequenceDiagram
 
 ### Access Control
 - Agent ownership enforced through Solana account ownership
-- Vault withdrawals only through payments to compute nodes or refunds
+- Vault withdrawals only through payments to nodes or refunds
 - Admin actions clearly separated and auditable
 
 ### Payment Security

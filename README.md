@@ -2,7 +2,15 @@
 
 ## Introduction
 
-Decentralized autonomous civilization (DAC) network built on Solana. The protocol enables secure, verifiable execution of AI agent tasks using Trusted Execution Environments (TEEs) and implements a payment system for compute resources.
+The Decentralized Autonomous Civilization (DAC) is a Solana-based network that enables verifiable, decentralized execution of AI agent tasks with granular payment management. The protocol supports both **public nodes** (standard execution) and **confidential nodes** (TEE-enabled for private data processing), implementing a multi-validator consensus system to ensure trust and correctness.
+
+**Key Features:**
+- **Dual Node Architecture**: Public nodes for standard tasks, confidential nodes (Intel SGX TEE) for private data processing
+- **Multi-Validator Consensus**: Agents, nodes, and tasks require multiple validations before approval/processing
+- **Share-Based Payment System**: Proportional cost distribution with automatic refunds and granular contribution tracking
+- **Goal-Oriented Execution**: Define objectives with iteration limits, treasury funding, and agent assignments
+- **Cryptographic Integrity**: SHA256 chain proofs verify complete execution history
+- **Decentralized Validation**: Any active node (public or confidential) can validate task execution results
 
 ## Core Components
 

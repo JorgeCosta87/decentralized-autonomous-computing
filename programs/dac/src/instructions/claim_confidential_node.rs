@@ -47,7 +47,7 @@ impl<'info> ClaimConfidentialNode<'info> {
         self.node_info.tee_signing_pubkey = Some(tee_signing_pubkey);
         self.node_info.status = NodeStatus::Active;
 
-        self.network_config.increment_validator_node_count()?;
+        self.network_config.increment_confidential_node_count()?;
 
         Ok(())
     }

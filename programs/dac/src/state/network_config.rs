@@ -19,8 +19,8 @@ pub struct NetworkConfig {
     pub agent_count: u64,
     pub goal_count: u64,
     pub task_count: u64,
-    pub validator_node_count: u64,
-    pub compute_node_count: u64,
+    pub confidential_node_count: u64,
+    pub public_node_count: u64,
     pub required_validations: u32,
     #[max_len(10)]
     pub approved_code_measurements: Vec<CodeMeasurement>,
@@ -84,17 +84,17 @@ impl NetworkConfig {
         Ok(())
     }
 
-    pub fn increment_validator_node_count(&mut self) -> Result<()> {
-        self.validator_node_count = self
-            .validator_node_count
+    pub fn increment_confidential_node_count(&mut self) -> Result<()> {
+        self.confidential_node_count = self
+            .confidential_node_count
             .checked_add(1)
             .ok_or(ErrorCode::Overflow)?;
         Ok(())
     }
 
-    pub fn increment_compute_node_count(&mut self) -> Result<()> {
-        self.compute_node_count = self
-            .compute_node_count
+    pub fn increment_public_node_count(&mut self) -> Result<()> {
+        self.public_node_count = self
+            .public_node_count
             .checked_add(1)
             .ok_or(ErrorCode::Overflow)?;
         Ok(())
