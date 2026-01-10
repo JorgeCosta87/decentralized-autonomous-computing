@@ -1,9 +1,8 @@
-use anchor_lang::Key;
 use dac_client::instructions::{
     ClaimComputeNodeBuilder, ClaimTaskBuilder, ClaimValidatorNodeBuilder, ContributeToGoalBuilder,
     CreateAgentBuilder, CreateGoalBuilder, InitializeNetworkBuilder, RegisterNodeBuilder,
-    SetGoalBuilder, SubmitTaskResultBuilder, SubmitTaskValidationBuilder, ValidateAgentBuilder,
-    ValidateComputeNodeBuilder, WithdrawFromGoalBuilder,
+    SetGoalBuilder, SubmitTaskResultBuilder, SubmitTaskValidationBuilder, UpdateNetworkConfigBuilder,
+    ValidateAgentBuilder, ValidateComputeNodeBuilder, WithdrawFromGoalBuilder,
 };
 use dac_client::types::{CodeMeasurement, NodeType};
 use litesvm::types::TransactionResult;
@@ -114,6 +113,13 @@ pub trait Instructions {
         task_slot_id: u64,
         compute_node_pubkey: &Pubkey,
         ed25519_ix: &Instruction,
+    ) -> TransactionResult;
+
+    fn update_network_config(
+        &mut self,
+        authority: &Keypair,
+        cid_config: Option<String>,
+        new_code_measurement: Option<CodeMeasurement>,
     ) -> TransactionResult;
 }
 
@@ -493,5 +499,31 @@ impl Instructions for TestFixture {
             &validator_pubkey,
             &[validator],
         )
+    }
+
+    fn update_network_config(
+        &mut self,
+        authority: &Keypair,
+        cid_config: Option<String>,
+        new_code_measurement: Option<CodeMeasurement>,
+    ) -> TransactionResult {
+        let authority_pubkey = authority.pubkey();
+        let network_config_pda = self.find_network_config_pda().0;
+
+        let mut builder = UpdateNetworkConfigBuilder::new();
+        builder
+            .authority(authority_pubkey)
+            .network_config(network_config_pda);
+
+        if let Some(cid) = cid_config {
+            builder.cid_config(cid);
+        }
+
+        if let Some(measurement) = new_code_measurement {
+            builder.new_code_measurement(measurement);
+        }
+
+        self.svm
+            .send_tx(&[builder.instruction()], &authority_pubkey, &[authority])
     }
 }

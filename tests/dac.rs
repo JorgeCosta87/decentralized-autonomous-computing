@@ -7,6 +7,7 @@ use crate::setup::Helpers;
 use crate::setup::Instructions;
 use crate::setup::TestFixture;
 use dac_client::{ActionType, AgentStatus, GoalStatus, NodeStatus, NodeType, TaskStatus};
+use dac_client::types::{CodeMeasurement, SemanticVersion};
 use sha2::{Digest, Sha256};
 use solana_sdk::signature::Signer;
 use utils::Utils;
@@ -90,6 +91,77 @@ fn test_initialize_network_with_remaining_accounts() {
             );
         }
         Err(e) => panic!("Failed to initialize network: {:#?}", e),
+    }
+}
+
+#[test]
+fn test_update_network_config() {
+    let mut fixt = TestFixture::new().with_initialize_network();
+
+    let new_cid_config = "QmNewConfigCID123";
+    let result = fixt.update_network_config(
+        &fixt.authority.insecure_clone(),
+        Some(new_cid_config.to_string()),
+        None,
+    );
+    match result {
+        Ok(_) => {
+            let network_config = fixt.get_network_config();
+            assert_eq!(network_config.cid_config, new_cid_config);
+        }
+        Err(e) => panic!("Failed to update network config CID: {:#?}", e),
+    }
+
+    let new_code_measurement = CodeMeasurement {
+        measurement: DEFAULT_CODE_MEASUREMENT,
+        version: SemanticVersion {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        },
+    };
+
+    let initial_measurements_count = fixt.get_network_config().approved_code_measurements.len();
+
+    let result = fixt.update_network_config(
+        &fixt.authority.insecure_clone(),
+        None,
+        Some(new_code_measurement),
+    );
+    match result {
+        Ok(_) => {
+            let network_config = fixt.get_network_config();
+            assert!(network_config.approved_code_measurements.len() >= initial_measurements_count);
+            assert_eq!(
+                network_config.approved_code_measurements[0].measurement,
+                DEFAULT_CODE_MEASUREMENT
+            );
+        }
+        Err(e) => panic!("Failed to update network config with code measurement: {:#?}", e),
+    }
+
+    let another_cid = "QmAnotherConfigCID456";
+    let another_code_measurement = CodeMeasurement {
+        measurement: [2u8; 32],
+        version: SemanticVersion {
+            major: 2,
+            minor: 0,
+            patch: 0,
+        },
+    };
+
+    let result = fixt.update_network_config(
+        &fixt.authority.insecure_clone(),
+        Some(another_cid.to_string()),
+        Some(another_code_measurement),
+    );
+    match result {
+        Ok(_) => {
+            let network_config = fixt.get_network_config();
+            assert_eq!(network_config.cid_config, another_cid);
+            assert_eq!(network_config.approved_code_measurements[0].measurement, [2u8; 32]);
+        }
+        Err(e) => panic!("Failed to update network config with both CID and measurement: {:#?}", e),
     }
 }
 
@@ -793,3 +865,4 @@ fn test_submit_task_validation_approved() {
         Err(e) => panic!("Failed to submit task validation: {:#?}", e),
     }
 }
+
