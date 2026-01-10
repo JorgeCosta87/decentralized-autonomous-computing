@@ -54,4 +54,6 @@ pub enum ErrorCode {
     InvalidValidatorMessage,
     #[msg("Invalid ipfs CID")]
     InvalidCID,
+    #[msg("Invalid authority")]
+    InvalidAuthority,
 }

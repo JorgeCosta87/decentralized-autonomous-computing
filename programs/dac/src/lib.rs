@@ -31,6 +31,14 @@ pub mod dac {
         )
     }
 
+    pub fn update_network_config(
+        ctx: Context<UpdateNetworkConfig>,
+        cid_config: Option<String>,
+        new_code_measurement: Option<CodeMeasurement>,
+    ) -> Result<()> {
+        ctx.accounts.update_network_config(cid_config, new_code_measurement)
+    }
+
     pub fn register_node(
         ctx: Context<RegisterNode>,
         node_pubkey: Pubkey,
@@ -106,4 +114,5 @@ pub mod dac {
     pub fn submit_task_validation(ctx: Context<SubmitTaskValidation>) -> Result<()> {
         ctx.accounts.submit_task_validation()
     }
+
 }
