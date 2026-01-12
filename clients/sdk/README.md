@@ -34,22 +34,36 @@ const { agentAddress } = await dacClient.createAgent({
 ```
 
 ### IPFSClient
-Upload and download data from IPFS.
+Upload and download data from IPFS. Files are automatically added to MFS (Mutable File System) so they appear in WebUI.
 
 ```typescript
 import { IPFSClient } from '@sol-mind-protocol/sdk';
 
 const ipfsClient = new IPFSClient({
-  apiUrl: 'https://api.pinata.cloud',
-  apiKey: 'your-api-key',
+  apiUrl: 'http://localhost:5001',
 });
 
-// Upload data
-const cid = await ipfsClient.upload('Hello World');
+// Upload data (automatically added to MFS for WebUI visibility)
+const cid = await ipfsClient.upload('Hello World', 'hello.txt');
 
 // Download data
 const data = await ipfsClient.download(cid);
+
+// List all pinned files with access URLs
+const files = await ipfsClient.listPinnedWithDetails();
+files.forEach(file => {
+  console.log(file.gatewayUrl); // http://localhost:8080/ipfs/<CID>
+});
+
+// List files in MFS (visible in WebUI)
+const mfsFiles = await ipfsClient.listMfsFiles('/dac-uploads');
 ```
+
+**File Tracking:**
+- Files uploaded via API are automatically added to `/dac-uploads/YYYY-MM-DD/` in MFS
+- View in WebUI: `http://localhost:5001/webui → Files → dac-uploads`
+- List all files: `npm run list-ipfs`
+- Access via Gateway: `http://localhost:8080/ipfs/<CID>`
 
 ### ValidatorNodeClient
 TEE-based validator node operations.
@@ -163,7 +177,3 @@ validatorClient.subscribeToTaskValidation(taskDataAddress, async (taskData) => {
   await validatorClient.validateTask({...});
 });
 ```
-
-## API Reference
-
-See the [main documentation](../../docs/OVERVIEW.md) for detailed API reference and workflows.

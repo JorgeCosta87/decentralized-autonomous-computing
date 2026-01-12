@@ -1,49 +1,46 @@
 # Test Keypair Generation Scripts
 
-## generate-test-keypairs.ts
+## generate_keypair.sh
 
-Generates test keypairs for DAC testing and saves them in Solana format.
+The bash script in `agent-network/scripts/generate_keypair.sh` generates **all** keypairs needed for DAC testing and airdrops 10 SOL to each address.
 
 ### Generated Keypairs:
-- **authority**: Network authority keypair
-- **node-owner**: Owner of compute/validator nodes
-- **compute-node**: Compute node's own keypair
-- **validator-owner**: Owner of validator node
-- **validator-node**: Validator node's own keypair
+- **public-node**: Public node keypair (saved to `keypairs/` folder in project root)
+- **confidential-node**: Confidential node keypair (saved to `keypairs/` folder in project root)
+- **authority**: Network authority keypair (saved to `keypairs/` folder in project root)
+- **node-owner**: Owner of nodes (saved to `keypairs/` folder in project root)
+- **validator-owner**: Owner of confidential node (saved to `keypairs/` folder in project root)
 
 ### Usage:
 
 ```bash
-# Run the script (recommended)
-npm run generate-keypairs
+# From project root
+cd agent-network && ./scripts/generate_keypair.sh
 
-# Or use npx directly
-npx tsx scripts/generate-test-keypairs.ts
+# Or from agent-network directory
+./scripts/generate_keypair.sh
 ```
 
 ### Output:
 
-The script creates a `test-keypairs/` directory with:
-- `{name}.json` - Solana keypair format (64 bytes array) - compatible with Rust nodes
-- `{name}.info.json` - Readable format with address
-- `keypairs-summary.json` - Summary of all addresses
+All keypairs saved to `keypairs/` folder in project root:
+  - `keypairs/public-node-keypair.json`
+  - `keypairs/confidential-node-keypair.json`
+  - `keypairs/authority-keypair.json`
+  - `keypairs/node-owner-keypair.json`
+  - `keypairs/validator-owner-keypair.json`
+  - `keypairs/keypairs.json` (summary with all pubkeys)
 
-### Files Created:
-- `authority.json` / `authority.info.json`
-- `node-owner.json` / `node-owner.info.json`
-- `compute-node.json` / `compute-node.info.json`
-- `validator-owner.json` / `validator-owner.info.json`
-- `validator-node.json` / `validator-node.info.json`
-- `keypairs-summary.json`
+- **Airdrop**: Automatically airdrops 10 SOL to all 5 addresses
 
 ## load-test-keypairs.ts
 
-Helper module to load generated keypairs in test files.
+Helper module to load generated keypairs in test files. Located in `src/load-test-keypairs.ts`.
 
 ### Usage:
 
 ```typescript
-import { loadTestKeypairs } from './scripts/load-test-keypairs.js';
+import { loadTestKeypairs } from './load-test-keypairs.js';
 
 const keypairs = await loadTestKeypairs();
 // Use keypairs.authority, keypairs.nodeOwner, etc.
@@ -52,7 +49,7 @@ const keypairs = await loadTestKeypairs();
 ### Example:
 
 ```typescript
-import { loadTestKeypairs } from './scripts/load-test-keypairs.js';
+import { loadTestKeypairs } from './load-test-keypairs.js';
 import { DacFrontendClient } from './index.js';
 
 const keypairs = await loadTestKeypairs();
@@ -66,6 +63,7 @@ const result = await dacClient.initializeNetwork({
 
 ## Notes:
 
+- **Recommended**: Use `generate_keypair.sh` to generate all keypairs at once
 - Keypairs are saved in Solana format (64-byte array) compatible with Rust nodes
-- The `test-keypairs/` directory is git-ignored for security
+- The `keypairs/` directory should be git-ignored for security
 - Regenerate keypairs if you need fresh ones for testing

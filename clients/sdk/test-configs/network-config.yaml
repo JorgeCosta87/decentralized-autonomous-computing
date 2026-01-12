@@ -1,0 +1,26 @@
+name: "DAC Testnet"
+description: "Decentralized Autonomous Civilization Test Network"
+version: "1.0.0"
+
+allowed_models:
+  - name: "qwen2.5-7b-instruct"
+    provider: "qwen"
+    parameters: 7000000000
+    use_case: "instruction_following"
+    vram_requirements:
+      fp16: 14.5
+      int8: 7.5
+      int4: 3.8
+    context_length: 32768
+    cost_per_1m_tokens: 0.10
+  
+  - name: "llama-3.1-8b-instruct"
+    provider: "meta"
+    parameters: 8000000000
+    use_case: "instruction_following"
+    vram_requirements:
+      fp16: 16.0
+      int8: 8.0
+      int4: 4.0
+    context_length: 128000
+    cost_per_1m_tokens: 0.08

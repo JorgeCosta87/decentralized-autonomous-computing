@@ -1,0 +1,94 @@
+title: "Write Technical Documentation for DAC Network"
+description: |
+  Create comprehensive technical documentation for the Decentralized Autonomous 
+  Civilization (DAC) network. The document should explain the architecture, 
+  components, and how to use the system.
+
+category: "technical_writing"
+
+deliverables:
+  - name: "Technical Documentation"
+    type: "document"
+    format: "markdown"
+    requirements:
+      - "Overview of DAC architecture"
+      - "Explanation of key components (agents, goals, tasks)"
+      - "User guide with examples"
+      - "Clear section structure with headings"
+      - "Proper markdown formatting"
+
+success_criteria:
+  - "Document is well-structured with clear sections"
+  - "Content is technically accurate"
+  - "Writing is clear and accessible"
+  - "Examples are included where appropriate"
+  - "Document length is 800-1500 words"
+
+expected_output:
+  format: "structured"
+  structure:
+    - field: "document"
+      type: "markdown"
+      required: true
+      description: "Complete technical documentation in markdown format"
+    - field: "word_count"
+      type: "number"
+      required: true
+      description: "Total word count of the document"
+    - field: "sections"
+      type: "array"
+      required: true
+      description: "List of main sections included"
+
+constraints:
+  technology_stack:
+    - "Markdown"
+  performance:
+    response_time_ms: 30000
+    throughput_rps: 1
+    concurrent_users: 1
+  code_quality:
+    - "Proper markdown syntax"
+    - "Clear headings and structure"
+    - "No spelling or grammar errors"
+
+iteration_plan:
+  - iteration: 1
+    goal: "Create document outline and introduction"
+    deliverables:
+      - "Document structure"
+      - "Introduction section"
+  - iteration: 2
+    goal: "Write main content sections"
+    deliverables:
+      - "Architecture section"
+      - "Components section"
+  - iteration: 3
+    goal: "Add examples and polish"
+    deliverables:
+      - "Usage examples"
+      - "Final formatting and review"
+
+validation:
+  automated:
+    - type: "format"
+      tool: "markdown_validator"
+      checks:
+        - "valid_markdown"
+        - "proper_headings"
+  manual:
+    - "Content is technically accurate"
+    - "Writing quality is high"
+    - "Document achieves stated goals"
+
+completion_detection:
+  method: "validator_judgment"
+  indicators:
+    - "All success criteria met"
+    - "Document is complete and polished"
+    - "Validator approves content quality"
+
+limits:
+  max_iterations: 5
+  max_cost_sol: 1.0
+  timeout_hours: 2
