@@ -50,7 +50,7 @@ const keypairs = await loadTestKeypairs();
 
 ```typescript
 import { loadTestKeypairs } from './load-test-keypairs.js';
-import { DacFrontendClient } from './index.js';
+import { DacSDK } from './index.js';
 
 const keypairs = await loadTestKeypairs();
 

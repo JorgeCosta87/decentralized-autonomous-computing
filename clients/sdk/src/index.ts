@@ -1,5 +1,5 @@
 // Main SDK exports
-export { DacFrontendClient, WaitMode } from './dacClient.js';
+export { DacSDK, WaitMode } from './dacClient.js';
 export { IpfsClient } from './ipfsClient.js';
 export type { IpfsClientOptions } from './ipfsClient.js';
 

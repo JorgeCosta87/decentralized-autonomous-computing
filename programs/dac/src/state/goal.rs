@@ -4,6 +4,7 @@ use anchor_lang::prelude::*;
 pub enum GoalStatus {
     Ready,
     Active,
+    //TODO: Add refund status in the future
 }
 
 #[account]

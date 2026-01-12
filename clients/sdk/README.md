@@ -1,49 +1,95 @@
-# Sol-Mind Protocol TypeScript SDK
+# Decentralized Autonomous Civilization (DAC) TypeScript SDK
 
-TypeScript SDK for interacting with the Sol-Mind Protocol DAC smart contract, IPFS, and node operations.
+TypeScript SDK for interacting with the Decentralized Autonomous Civilization (DAC) smart contract, IPFS, and node operations.
 
 ## Installation
 
 ```bash
-npm install @sol-mind-protocol/sdk
+npm install
 ```
 
 ## Components
 
-### DacManagerClient
-Interact with the DAC smart contract on Solana.
+### DacSDK
+Interact with the DAC smart contract on Solana. This client provides methods for frontend/UI operations only. Node operations (like claimTask, submitTaskResult, etc.) are handled by separate node clients.
 
 ```typescript
-import { DacManagerClient } from '@sol-mind-protocol/sdk';
+import { DacSDK } from './dacClient';
 import { createSolanaClient } from 'gill';
 
-const client = createSolanaClient({ rpc: 'https://api.mainnet-beta.solana.com' });
-const dacClient = new DacManagerClient(client);
+const client = createSolanaClient('https://api.mainnet-beta.solana.com');
+const dacClient = new DacSDK(client);
 
-// Create agent
-const { agentAddress } = await dacClient.createAgent({
-  payer: signer,
-  owner: signer,
-  agentId: 0n,
-  computeNodeOwner: computeNodeOwner,
-  computeNodePubkey: computeNodePubkey,
-  public: true,
-  allocatedGoals: 10,
-  allocatedTasks: 100,
+// Initialize network
+const { signature, networkConfigAddress } = await dacClient.initializeNetwork({
+  authority: myKeypair,
+  cidConfig: 'QmNetworkConfig...',
+  allocateGoals: 10n,
+  allocateTasks: 10n,
+  approvedCodeMeasurements: [...],
+  requiredValidations: 1
+});
+
+// Create an agent
+const { signature, agentAddress, agentSlotId } = await dacClient.createAgent({
+  agentOwner: myKeypair,
+  networkConfig: networkConfigAddress,
+  agentConfigCid: 'QmXXX...'
+});
+
+// Create a goal (public or confidential)
+const { signature, goalAddress, goalSlotId, taskAddress, taskSlotId } = await dacClient.createGoal({
+  payer: myKeypair,
+  owner: myKeypair,
+  networkConfig: networkConfigAddress,
+  isOwned: true,
+  isConfidential: false
 });
 ```
 
-### IPFSClient
-Upload and download data from IPFS. Files are automatically added to MFS (Mutable File System) so they appear in WebUI.
+### Status Waiting Methods
+
+Wait for nodes or agents to reach a specific status using WebSocket subscriptions.
 
 ```typescript
-import { IPFSClient } from '@sol-mind-protocol/sdk';
+import { DacSDK, WaitMode } from './dacClient';
 
-const ipfsClient = new IPFSClient({
+// Wait for nodes to reach a specific status
+const nodes = await dacClient.waitForNodesStatus(
+  [nodePubkey1, nodePubkey2],
+  NodeStatus.Active,
+  {
+    timeoutMs: 30000,
+    waitMode: WaitMode.All
+  }
+);
+
+// Wait for agents to reach a specific status
+const agents = await dacClient.waitForAgentsStatus(
+  [agentAddress1, agentAddress2],
+  AgentStatus.Validated,
+  {
+    timeoutMs: 30000,
+    waitMode: WaitMode.First
+  }
+);
+```
+
+**WaitMode Options:**
+- `WaitMode.All`: Wait for all specified nodes/agents to reach the target status. Default.
+- `WaitMode.First`: Return when the first node/agent reaches the target status.
+
+### IPFSClient
+Upload and download data from IPFS. Files are automatically added to MFS (Mutable File System).
+
+```typescript
+import { IpfsClient } from './ipfsClient';
+
+const ipfsClient = new IpfsClient({
   apiUrl: 'http://localhost:5001',
 });
 
-// Upload data (automatically added to MFS for WebUI visibility)
+// Upload data
 const cid = await ipfsClient.upload('Hello World', 'hello.txt');
 
 // Download data
@@ -52,7 +98,7 @@ const data = await ipfsClient.download(cid);
 // List all pinned files with access URLs
 const files = await ipfsClient.listPinnedWithDetails();
 files.forEach(file => {
-  console.log(file.gatewayUrl); // http://localhost:8080/ipfs/<CID>
+  console.log(file.gatewayUrl);
 });
 
 // List files in MFS (visible in WebUI)
@@ -60,120 +106,112 @@ const mfsFiles = await ipfsClient.listMfsFiles('/dac-uploads');
 ```
 
 **File Tracking:**
-- Files uploaded via API are automatically added to `/dac-uploads/YYYY-MM-DD/` in MFS
+- Files uploaded via API are added to `/dac-uploads/YYYY-MM-DD/` in MFS
 - View in WebUI: `http://localhost:5001/webui → Files → dac-uploads`
-- List all files: `npm run list-ipfs`
-- Access via Gateway: `http://localhost:8080/ipfs/<CID>`
-
-### ValidatorNodeClient
-TEE-based validator node operations.
-
-```typescript
-import { ValidatorNodeClient } from '@sol-mind-protocol/sdk';
-
-const validatorClient = new ValidatorNodeClient(
-  dacClient,
-  ipfsClient,
-  {
-    nodePubkey: validatorPubkey,
-    teeSigningKey: teePrivateKey,
-  },
-  client
-);
-
-// Subscribe to task validations
-validatorClient.subscribeToTaskValidation(taskDataAddress, (taskData) => {
-  // Validate task
-  await validatorClient.validateTask({...});
-});
-```
-
-### ComputeNodeClient
-Compute node for task execution.
-
-```typescript
-import { ComputeNodeClient } from '@sol-mind-protocol/sdk';
-
-const computeClient = new ComputeNodeClient(
-  dacClient,
-  ipfsClient,
-  {
-    nodePubkey: computeNodePubkey,
-    llmProvider: 'https://api.openai.com/v1/completions',
-    llmApiKey: 'your-api-key',
-  },
-  client
-);
-
-// Subscribe to tasks
-computeClient.subscribeToTasks(agentAddress, async (taskData) => {
-  // Claim and execute task
-  await computeClient.claimAndExecuteTask({
-    taskDataAddress,
-    agentAddress,
-    goalAddress,
-    payer: signer,
-    computeNode: signer,
-  });
-});
-```
+- List files: `npm run list-ipfs`
+- Gateway access: `http://localhost:8080/ipfs/<CID>`
 
 ## Usage Examples
 
 ### Complete Workflow
 
 ```typescript
-import {
-  DacManagerClient,
-  IPFSClient,
-  ValidatorNodeClient,
-  ComputeNodeClient,
-} from '@sol-mind-protocol/sdk';
+import { DacSDK, WaitMode } from './dacClient';
+import { IpfsClient } from './ipfsClient';
+import { createSolanaClient } from 'gill';
 
 // 1. Initialize clients
-const solanaClient = createSolanaClient({ rpc: RPC_URL });
-const dacClient = new DacManagerClient(solanaClient);
-const ipfsClient = new IPFSClient({ apiUrl: IPFS_API_URL, apiKey: IPFS_API_KEY });
+const solanaClient = createSolanaClient('https://api.mainnet-beta.solana.com');
+const dacClient = new DacSDK(solanaClient);
+const ipfsClient = new IpfsClient({ apiUrl: 'http://localhost:5001' });
 
-// 2. Upload agent config to IPFS
+// 2. Initialize network
+const { signature, networkConfigAddress } = await dacClient.initializeNetwork({
+  authority: authorityKeypair,
+  cidConfig: 'QmNetworkConfig...',
+  allocateGoals: 10n,
+  allocateTasks: 100n,
+  approvedCodeMeasurements: [...],
+  requiredValidations: 1
+});
+
+// 3. Upload agent config to IPFS
 const agentConfig = { name: 'My Agent', model: 'gpt-4' };
-const agentConfigCid = await ipfsClient.upload(agentConfig);
+const agentConfigCid = await ipfsClient.upload(JSON.stringify(agentConfig));
 
-// 3. Create agent
-const { agentAddress } = await dacClient.createAgent({
-  payer: signer,
-  owner: signer,
-  agentId: 0n,
-  computeNodeOwner: computeNodeOwner,
-  computeNodePubkey: computeNodePubkey,
-  public: true,
-  allocatedGoals: 10,
-  allocatedTasks: 100,
+// 4. Create agent
+const { signature, agentAddress, agentSlotId } = await dacClient.createAgent({
+  agentOwner: agentOwnerKeypair,
+  networkConfig: networkConfigAddress,
+  agentConfigCid: agentConfigCid
 });
 
-// 4. Setup compute node
-const computeClient = new ComputeNodeClient(
-  dacClient,
-  ipfsClient,
-  { nodePubkey: computeNodePubkey, llmProvider: LLM_URL },
-  solanaClient
+// 5. Wait for agent to be validated
+const validatedAgents = await dacClient.waitForAgentsStatus(
+  [agentAddress],
+  AgentStatus.Validated,
+  {
+    timeoutMs: 60000,
+    waitMode: WaitMode.All
+  }
 );
 
-// 5. Setup validator node
-const validatorClient = new ValidatorNodeClient(
-  dacClient,
-  ipfsClient,
-  { nodePubkey: validatorPubkey, teeSigningKey: teeKey },
-  solanaClient
+// 6. Create a goal
+const { signature, goalAddress, goalSlotId, taskAddress, taskSlotId } = await dacClient.createGoal({
+  payer: goalOwnerKeypair,
+  owner: goalOwnerKeypair,
+  networkConfig: networkConfigAddress,
+  isOwned: true,
+  isConfidential: false
+});
+
+// 7. Set goal specification
+await dacClient.setGoal({
+  owner: goalOwnerKeypair,
+  networkConfig: networkConfigAddress,
+  goalSlotId: goalSlotId,
+  agentSlotId: agentSlotId,
+  taskSlotId: taskSlotId,
+  specificationCid: 'QmGoalSpec...',
+  maxIterations: 10n,
+  initialDeposit: 1000000000n
+});
+
+// 8. Wait for nodes to become active
+const activeNodes = await dacClient.waitForNodesStatus(
+  [nodePubkey1, nodePubkey2],
+  NodeStatus.Active,
+  {
+    timeoutMs: 30000,
+    waitMode: WaitMode.All
+  }
 );
+```
 
-// 6. Compute node subscribes to tasks
-computeClient.subscribeToTasks(agentAddress, async (taskData) => {
-  await computeClient.claimAndExecuteTask({...});
+### Querying Data
+
+```typescript
+// Get network configuration
+const networkConfig = await dacClient.getNetworkConfig(authorityAddress);
+
+// Get agent by address
+const agent = await dacClient.getAgent(agentAddress);
+
+// Get agent by slot ID
+const agent = await dacClient.getAgentBySlot(networkConfigAddress, 0n);
+
+// Get all agents by status
+const pendingAgents = await dacClient.getAgentsByStatus(AgentStatus.Pending);
+const validatedAgents = await dacClient.getAgentsByStatus(AgentStatus.Validated);
+
+// Get all nodes by status
+const activeNodes = await dacClient.getNodesByStatus({ status: NodeStatus.Active });
+const publicNodes = await dacClient.getNodesByStatus({ 
+  status: NodeStatus.Active, 
+  nodeType: NodeType.Public 
 });
 
-// 7. Validator subscribes to validations
-validatorClient.subscribeToTaskValidation(taskDataAddress, async (taskData) => {
-  await validatorClient.validateTask({...});
-});
+// Get goal and task
+const goal = await dacClient.getGoal(networkConfigAddress, goalSlotId);
+const task = await dacClient.getTask(networkConfigAddress, taskSlotId);
 ```

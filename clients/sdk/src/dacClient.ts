@@ -62,12 +62,12 @@ import type { CodeMeasurementArgs, NodeStatus, AgentStatus, TaskStatus, GoalStat
 import { base64 } from '@coral-xyz/anchor/dist/cjs/utils/bytes/index.js';
 
 /**
- * Wait mode for waitForNodesStatus
+ * Wait mode for waitForNodesStatus and waitForAgentsStatus
  */
 export enum WaitMode {
-  /** Wait for all nodes to reach the target status */
+  /** Wait for all nodes/agents to reach the target status */
   All = 'all',
-  /** Return as soon as the first node reaches the target status */
+  /** Return as soon as the first node/agent reaches the target status */
   First = 'first',
 }
 
@@ -80,10 +80,10 @@ export enum WaitMode {
  * @example
  * ```typescript
  * import { createSolanaClient } from 'gill';
- * import { DacFrontendClient } from './dacFrontendClient';
+ * import { DacSDK } from './dacClient';
  * 
  * const client = createSolanaClient('https://api.mainnet-beta.solana.com');
- * const dacClient = new DacFrontendClient(client);
+ * const dacClient = new DacSDK(client);
  * 
  * // Initialize network
  * const { signature, networkConfigAddress } = await dacClient.initializeNetwork({
@@ -112,7 +112,7 @@ export enum WaitMode {
  * });
  * ```
  */
-export class DacFrontendClient {
+export class DacSDK {
   private authority: Address | null = null;
 
   constructor(
@@ -626,46 +626,54 @@ export class DacFrontendClient {
   }
 
   /**
-   * Wait for nodes to reach a specific status using WebSocket subscriptions
-   * This is event-driven and more efficient than polling
-   * 
-   * @param nodePubkeys - Array of node public keys to wait for
-   * @param targetStatus - The status to wait for
-   * @param options - Optional configuration
-   * @param options.timeoutMs - Optional timeout in milliseconds. If not provided, will wait indefinitely
-   * @param options.waitMode - Wait mode: 'all' to wait for all nodes, 'first' to return on first node. Default: 'all'
-   * @returns Promise that resolves with node(s) that reached the target status
-   *   - If waitMode is 'all': returns array of all nodes
-   *   - If waitMode is 'first': returns array with single node (the first one that reached the status)
+   * Generic helper to wait for accounts to reach a specific status using WebSocket subscriptions
    */
-  async waitForNodesStatus(
-    nodePubkeys: Address[],
-    targetStatus: NodeStatus,
-    options?: { timeoutMs?: number; waitMode?: WaitMode }
-  ): Promise<NodeInfo[]> {
+  private async waitForStatus<T, TStatus>(
+    targetKeys: Address[],
+    targetStatus: TStatus,
+    options: { timeoutMs?: number; waitMode?: WaitMode } | undefined,
+    config: {
+      getByStatus: (status: TStatus) => Promise<T[]>;
+      discriminator: Uint8Array;
+      statusOffset: number;
+      decode: (encodedAccount: any) => { data: T };
+      getKey: (item: T) => Address;
+      getAccountKey: (notification: any) => Address;
+      entityName: string;
+      initialFoundItems?: Map<Address, T>; // Pre-populated found items (e.g., from manual initial check)
+    }
+  ): Promise<T[]> {
     const waitMode = options?.waitMode ?? WaitMode.All;
+    const foundItems = config.initialFoundItems ? new Map(config.initialFoundItems) : new Map<Address, T>();
     
-    // First, check current state immediately
-    const initialNodes = await this.getNodesByStatus({ status: targetStatus });
-    const foundNodes = new Map<Address, NodeInfo>();
-    console.log('nodePubkeys nodes:', nodePubkeys);
-    for (const node of initialNodes) {
-      if (nodePubkeys.includes(node.nodePubkey)) {
-        foundNodes.set(node.nodePubkey, node);
+    // First, check current state immediately (skip if initialFoundItems provided)
+    if (!config.initialFoundItems) {
+      const initialItems = await config.getByStatus(targetStatus);
+      
+      for (const item of initialItems) {
+        const key = config.getKey(item);
+        if (key && targetKeys.includes(key)) {
+          foundItems.set(key, item);
+        }
       }
-    }
-    console.log('Initial nodes:', initialNodes);
-    console.log('Found nodes:', foundNodes);
-    console.log('Wait mode:', waitMode);
-    // If waitMode is 'first' and we found at least one node, return immediately
-    if (waitMode === WaitMode.First && foundNodes.size > 0) {
-      console.log('Found nodes:', foundNodes);
-      return Array.from(foundNodes.values());
-    }
+      
+      // If waitMode is 'first' and we found at least one item, return immediately
+      if (waitMode === WaitMode.First && foundItems.size > 0) {
+        return Array.from(foundItems.values());
+      }
 
-    // If waitMode is 'all' and all nodes are already in target status, return immediately
-    if (waitMode === WaitMode.All && foundNodes.size === nodePubkeys.length) {
-      return Array.from(foundNodes.values());
+      // If waitMode is 'all' and all items are already in target status, return immediately
+      if (waitMode === WaitMode.All && foundItems.size === targetKeys.length) {
+        return Array.from(foundItems.values());
+      }
+    } else {
+      // If initialFoundItems provided, check if we can return early
+      if (waitMode === WaitMode.First && foundItems.size > 0) {
+        return Array.from(foundItems.values());
+      }
+      if (waitMode === WaitMode.All && foundItems.size === targetKeys.length) {
+        return Array.from(foundItems.values());
+      }
     }
 
     // Set up abort signal (only if timeout is provided)
@@ -684,13 +692,13 @@ export class DacFrontendClient {
         {
           memcmp: {
             offset: 0,
-            bytes: Array.from(NODE_INFO_DISCRIMINATOR),
+            bytes: Array.from(config.discriminator),
           },
         },
         {
           memcmp: {
-            offset: 73, // discriminator 8 + owner 32 + nodePubkey 32 + nodeType 1
-            bytes: [targetStatus],
+            offset: config.statusOffset,
+            bytes: [targetStatus as number],
           },
         },
       ];
@@ -718,33 +726,41 @@ export class DacFrontendClient {
             space: accountInfo.space ?? 0n,
           };
           
-          const decoded = decodeNodeInfo(encodedAccount as any);
-          const nodeInfo = 'exists' in decoded && decoded.exists ? decoded.data : decoded.data;
+          const decoded = config.decode(encodedAccount);
+          const item = 'exists' in decoded && decoded.exists ? decoded.data : decoded.data;
           
-          if (!nodeInfo) {
+          if (!item) {
             continue;
           }
 
-          // Check if this is one of the nodes we're waiting for
-          if (nodePubkeys.includes(nodeInfo.nodePubkey)) {
-            foundNodes.set(nodeInfo.nodePubkey, nodeInfo);
+          const accountKey = config.getAccountKey(notification);
+          const itemKey = config.getKey(item);
+          
+          // Check if this is one of the items we're waiting for
+          // For nodes: match by nodePubkey field
+          // For agents: match by account address (itemKey will be empty string, use accountKey)
+          const key = itemKey || accountKey;
+          const matches = targetKeys.includes(key);
+          
+          if (matches) {
+            foundItems.set(key, item);
 
-            // If waitMode is 'first', return as soon as we find one node
+            // If waitMode is 'first', return as soon as we find one item
             if (waitMode === WaitMode.First) {
               if (timeoutId) {
                 clearTimeout(timeoutId);
               }
               abortController.abort(); // Unsubscribe
-              return Array.from(foundNodes.values());
+              return Array.from(foundItems.values());
             }
 
-            // If waitMode is 'all', check if we've found all nodes
-            if (waitMode === WaitMode.All && foundNodes.size === nodePubkeys.length) {
+            // If waitMode is 'all', check if we've found all items
+            if (waitMode === WaitMode.All && foundItems.size === targetKeys.length) {
               if (timeoutId) {
                 clearTimeout(timeoutId);
               }
               abortController.abort(); // Unsubscribe
-              return Array.from(foundNodes.values());
+              return Array.from(foundItems.values());
             }
           }
         } catch (error) {
@@ -752,17 +768,17 @@ export class DacFrontendClient {
         }
       }
 
-      // If we exit the loop without finding nodes, throw timeout (only if timeout was set)
+      // If we exit the loop without finding items, throw timeout (only if timeout was set)
       if (options?.timeoutMs !== undefined) {
-        const expectedCount = waitMode === WaitMode.First ? 1 : nodePubkeys.length;
+        const expectedCount = waitMode === WaitMode.First ? 1 : targetKeys.length;
         throw new Error(
-          `Timeout waiting for ${expectedCount} node(s) to reach status ${targetStatus}`
+          `Timeout waiting for ${expectedCount} ${config.entityName}(s) to reach status ${targetStatus}`
         );
       }
       
       // If no timeout, this shouldn't happen, but handle gracefully
       throw new Error(
-        `Subscription ended unexpectedly while waiting for nodes to reach status ${targetStatus}`
+        `Subscription ended unexpectedly while waiting for ${config.entityName}s to reach status ${targetStatus}`
       );
     } catch (error: any) {
       if (timeoutId) {
@@ -772,19 +788,110 @@ export class DacFrontendClient {
       // If aborted due to timeout, throw timeout error
       if (error.name === 'AbortError' || abortController.signal.aborted) {
         if (options?.timeoutMs !== undefined) {
-          const expectedCount = waitMode === WaitMode.First ? 1 : nodePubkeys.length;
+          const expectedCount = waitMode === WaitMode.First ? 1 : targetKeys.length;
           throw new Error(
-            `Timeout waiting for ${expectedCount} node(s) to reach status ${targetStatus}`
+            `Timeout waiting for ${expectedCount} ${config.entityName}(s) to reach status ${targetStatus}`
           );
         }
         // If no timeout was set but we got aborted, it might be a manual abort
         throw new Error(
-          `Subscription aborted while waiting for nodes to reach status ${targetStatus}`
+          `Subscription aborted while waiting for ${config.entityName}s to reach status ${targetStatus}`
         );
       }
       
       // Otherwise, rethrow the original error
       throw error;
     }
+  }
+
+  /**
+   * Wait for nodes to reach a specific status using WebSocket subscriptions
+   * This is event-driven and more efficient than polling
+   * 
+   * @param nodePubkeys - Array of node public keys to wait for
+   * @param targetStatus - The status to wait for
+   * @param options - Optional configuration
+   * @param options.timeoutMs - Optional timeout in milliseconds. If not provided, will wait indefinitely
+   * @param options.waitMode - Wait mode: 'all' to wait for all nodes, 'first' to return on first node. Default: 'all'
+   * @returns Promise that resolves with node(s) that reached the target status
+   *   - If waitMode is 'all': returns array of all nodes
+   *   - If waitMode is 'first': returns array with single node (the first one that reached the status)
+   */
+  async waitForNodesStatus(
+    nodePubkeys: Address[],
+    targetStatus: NodeStatus,
+    options?: { timeoutMs?: number; waitMode?: WaitMode }
+  ): Promise<NodeInfo[]> {
+    return this.waitForStatus(
+      nodePubkeys,
+      targetStatus,
+      options,
+      {
+        getByStatus: (status) => this.getNodesByStatus({ status }),
+        discriminator: NODE_INFO_DISCRIMINATOR,
+        statusOffset: 73, // discriminator 8 + owner 32 + nodePubkey 32 + nodeType 1
+        decode: decodeNodeInfo,
+        getKey: (node) => node.nodePubkey,
+        getAccountKey: (notification) => notification.value.pubkey,
+        entityName: 'node',
+      }
+    );
+  }
+
+  /**
+   * Wait for agents to reach a specific status using WebSocket subscriptions
+   * This is event-driven and more efficient than polling
+   * 
+   * @param agentAddresses - Array of agent addresses to wait for
+   * @param targetStatus - The status to wait for
+   * @param options - Optional configuration
+   * @param options.timeoutMs - Optional timeout in milliseconds. If not provided, will wait indefinitely
+   * @param options.waitMode - Wait mode: 'all' to wait for all agents, 'first' to return on first agent. Default: 'all'
+   * @returns Promise that resolves with agent(s) that reached the target status
+   *   - If waitMode is 'all': returns array of all agents
+   *   - If waitMode is 'first': returns array with single agent (the first one that reached the status)
+   */
+  async waitForAgentsStatus(
+    agentAddresses: Address[],
+    targetStatus: AgentStatus,
+    options?: { timeoutMs?: number; waitMode?: WaitMode }
+  ): Promise<Agent[]> {
+    const waitMode = options?.waitMode ?? WaitMode.All;
+    
+    // For agents, check each address individually since we match by address, not by a field
+    const foundAgents = new Map<Address, Agent>();
+    for (const agentAddress of agentAddresses) {
+      const agent = await this.getAgent(agentAddress);
+      if (agent && agent.status === targetStatus) {
+        foundAgents.set(agentAddress, agent);
+      }
+    }
+    
+    // If waitMode is 'first' and we found at least one agent, return immediately
+    if (waitMode === WaitMode.First && foundAgents.size > 0) {
+      return Array.from(foundAgents.values());
+    }
+
+    // If waitMode is 'all' and all agents are already in target status, return immediately
+    if (waitMode === WaitMode.All && foundAgents.size === agentAddresses.length) {
+      return Array.from(foundAgents.values());
+    }
+
+    // Use the generic helper for subscription-based waiting (pass initial found items)
+    return this.waitForStatus(
+      agentAddresses,
+      targetStatus,
+      options,
+      {
+        getByStatus: (status) => this.getAgentsByStatus(status),
+        discriminator: AGENT_DISCRIMINATOR,
+        statusOffset: 48, // discriminator 8 + agentSlotId 8 + owner 32
+        decode: decodeAgent,
+        getKey: (_agent) => '' as Address, // Agents are matched by account address, not a field
+        getAccountKey: (notification) => notification.value.pubkey,
+        entityName: 'agent',
+        initialFoundItems: foundAgents, // Pass the manually found agents
+      }
+    );
   }
 }

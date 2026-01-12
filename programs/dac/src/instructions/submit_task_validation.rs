@@ -328,6 +328,7 @@ impl<'info> SubmitTaskValidation<'info> {
 
         if message.goal_completed {
             self.goal.status = GoalStatus::Ready;
+            self.task.status = TaskStatus::Ready;
         } else {
             self.task.status = TaskStatus::Pending;
         }
