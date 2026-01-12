@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
-use crate::state::{Goal, GoalStatus, NetworkConfig};
+use crate::state::{Goal, GoalStatus, NetworkConfig, Task, TaskStatus};
+use crate::ActionType;
 
 #[derive(Accounts)]
 pub struct CreateGoal<'info> {
@@ -30,6 +31,19 @@ pub struct CreateGoal<'info> {
     )]
     pub goal: Account<'info, Goal>,
 
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + Task::INIT_SPACE,
+        seeds = [
+            b"task",
+            network_config.key().as_ref(),
+            network_config.next_task_slot_id().to_le_bytes().as_ref()
+        ],
+        bump,
+    )]
+    pub task: Account<'info, Task>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -41,6 +55,7 @@ impl<'info> CreateGoal<'info> {
         bumps: &CreateGoalBumps,
     ) -> Result<()> {
         let goal_slot_id = self.network_config.next_goal_slot_id();
+        let task_slot_id = self.network_config.next_task_slot_id();
         let genesis_hash = self.network_config.genesis_hash;
 
         let owner = if is_owned {
@@ -49,11 +64,32 @@ impl<'info> CreateGoal<'info> {
             Pubkey::default()
         };
 
+        // Initialize task
+        self.task.set_inner(Task {
+            task_slot_id,
+            action_type: ActionType::Llm,
+            status: TaskStatus::Ready,
+            input_cid: None,
+            output_cid: None,
+            pending_input_cid: None,
+            pending_output_cid: None,
+            next_input_cid: None,
+            chain_proof: genesis_hash,
+            agent: Pubkey::default(),
+            compute_node: None,
+            execution_count: 0,
+            max_task_cost: 0,
+            approved_validators: Vec::new(),
+            rejected_validators: Vec::new(),
+            bump: bumps.task,
+        });
+
+        // Initialize goal and link to task
         self.goal.set_inner(Goal {
             goal_slot_id,
             owner,
             agent: Pubkey::default(),
-            task: Pubkey::default(),
+            task: self.task.key(),
             status: GoalStatus::Ready,
             specification_cid: "".to_string(),
             max_iterations: 0,
@@ -69,6 +105,7 @@ impl<'info> CreateGoal<'info> {
         });
 
         self.network_config.increment_goal_count()?;
+        self.network_config.increment_task_count()?;
 
         Ok(())
     }

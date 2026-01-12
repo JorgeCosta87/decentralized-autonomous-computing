@@ -1,3 +1,4 @@
+pub mod activate_node;
 pub mod claim_compute_node;
 pub mod claim_confidential_node;
 pub mod claim_task;
@@ -14,6 +15,7 @@ pub mod validate_agent;
 pub mod validate_public_node;
 pub mod withdraw_from_goal;
 
+pub use activate_node::*;
 pub use claim_compute_node::*;
 pub use claim_confidential_node::*;
 pub use claim_task::*;

@@ -65,10 +65,12 @@ pub mod dac {
             .claim_confidential_node(code_measurement, tee_signing_pubkey)
     }
 
-    // Note: validate_public_node handles only validation of public nodes (Public type)
-    // The tee confidential nodes get approved by itself.
     pub fn validate_public_node(ctx: Context<ValidatePublicNode>, approved: bool) -> Result<()> {
         ctx.accounts.validate_public_node(approved)
+    }
+
+    pub fn activate_node(ctx: Context<ActivateNode>) -> Result<()> {
+        ctx.accounts.activate_node()
     }
 
     pub fn create_agent(ctx: Context<CreateAgent>, agent_config_cid: String) -> Result<()> {
