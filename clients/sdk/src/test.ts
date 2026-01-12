@@ -1,7 +1,7 @@
 import { createSolanaClient } from 'gill';
 import { DacSDK, NodeType, DAC_PROGRAM_ID, IpfsClient, WaitMode } from './index.js';
 import { NodeStatus } from './generated/dac/types/index.js';
-import { deriveNetworkConfigAddress, deriveNodeInfoAddress, deriveAgentAddress, deriveGoalAddress, deriveTaskAddress } from './dacPdas.js';
+import { deriveNetworkConfigAddress, deriveNodeInfoAddress, deriveAgentAddress, deriveGoalAddress, deriveTaskAddress } from './dac/dacPdas.js';
 import { loadTestKeypairs } from './load-test-keypairs.js';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -456,6 +456,41 @@ async function main() {
 
     console.log('✅ Goal set successfully!');
     console.log(`  Transaction Signature: ${setGoalSignature}\n`);
+
+    // Wait for goal to reach Ready status
+    console.log('Waiting for goal to reach Ready status...');
+    try {
+      const readyGoals = await dacClient.waitForGoalsStatus(
+        [goalAddress],
+        GoalStatus.Ready,
+        {
+          timeoutMs: 60000,
+          waitMode: WaitMode.First
+        }
+      );
+
+      if (readyGoals.length > 0) {
+        console.log('✅ Goal reached Ready status!');
+        console.log(`  Goal Status: ${readyGoals[0].status}\n`);
+      }
+    } catch (error: any) {
+      if (error.message?.includes('Timeout')) {
+        console.log('⚠️  Timeout waiting for goal to reach Ready status.');
+        console.log('   Goal may still be processing...\n');
+      } else {
+        throw error;
+      }
+    }
+
+    const createdGoalData = await dacClient.getGoal(networkConfigAddr, goalSlotId);
+    if (createdGoalData) {
+      console.log('✅ Goal verified:');
+      console.log(`  Status: ${createdGoalData.status}`);
+      console.log(`  Linked Task: ${createdGoalData.task}`);
+    } else {
+      console.log('⚠️  Goal not found.');
+      console.log('   Goal may still be processing...\n');
+    }
 
   } catch (error) {
     console.error('❌ Failed to set goal:');

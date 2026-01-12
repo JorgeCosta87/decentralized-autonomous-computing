@@ -11,6 +11,7 @@ npm install
 ## Components
 
 ### DacSDK
+
 Interact with the DAC smart contract on Solana. This client provides methods for frontend/UI operations only. Node operations (like claimTask, submitTaskResult, etc.) are handled by separate node clients.
 
 ```typescript
@@ -30,14 +31,22 @@ const { signature, networkConfigAddress } = await dacClient.initializeNetwork({
   requiredValidations: 1
 });
 
-// Create an agent
+// Register node
+const { signature, nodeInfoAddress, nodeTreasuryAddress } = await dacClient.registerNode({
+  owner: myKeypair,
+  networkConfig: networkConfigAddress,
+  nodePubkey: nodePubkey,
+  nodeType: NodeType.Public
+});
+
+// Create agent
 const { signature, agentAddress, agentSlotId } = await dacClient.createAgent({
   agentOwner: myKeypair,
   networkConfig: networkConfigAddress,
   agentConfigCid: 'QmXXX...'
 });
 
-// Create a goal (public or confidential)
+// Create goal
 const { signature, goalAddress, goalSlotId, taskAddress, taskSlotId } = await dacClient.createGoal({
   payer: myKeypair,
   owner: myKeypair,
@@ -45,11 +54,86 @@ const { signature, goalAddress, goalSlotId, taskAddress, taskSlotId } = await da
   isOwned: true,
   isConfidential: false
 });
+
+// Set goal specification
+await dacClient.setGoal({
+  owner: myKeypair,
+  networkConfig: networkConfigAddress,
+  goalSlotId: goalSlotId,
+  agentSlotId: agentSlotId,
+  taskSlotId: taskSlotId,
+  specificationCid: 'QmGoalSpec...',
+  maxIterations: 10n,
+  initialDeposit: 1000000000n
+});
+
+// Contribute to goal
+await dacClient.contributeToGoal({
+  contributor: myKeypair,
+  networkConfig: networkConfigAddress,
+  goalSlotId: goalSlotId,
+  depositAmount: 1000000000n
+});
+
+// Withdraw from goal
+await dacClient.withdrawFromGoal({
+  contributor: myKeypair,
+  networkConfig: networkConfigAddress,
+  goalSlotId: goalSlotId,
+  sharesToBurn: 1000000n
+});
+
+// Update network config
+await dacClient.updateNetworkConfig({
+  authority: myKeypair,
+  cidConfig: 'QmNewConfig...',
+  newCodeMeasurement: {...}
+});
+
+// Activate node
+await dacClient.activateNode({
+  authority: myKeypair,
+  nodePubkey: nodePubkey
+});
 ```
 
-### Status Waiting Methods
+### Query Methods
 
-Wait for nodes or agents to reach a specific status using WebSocket subscriptions.
+Retrieve network state and account data.
+
+```typescript
+// Network configuration
+const networkConfig = await dacClient.getNetworkConfig(authorityAddress);
+
+// Agents
+const agent = await dacClient.getAgent(agentAddress);
+const agent = await dacClient.getAgentBySlot(networkConfigAddress, 0n);
+const agents = await dacClient.getAgentsByStatus(AgentStatus.Validated);
+const pendingAgents = await dacClient.getAgentsByStatus(AgentStatus.Pending);
+
+// Goals
+const goal = await dacClient.getGoal(networkConfigAddress, goalSlotId);
+const goals = await dacClient.getGoalsByStatus(GoalStatus.Active);
+
+// Tasks
+const task = await dacClient.getTask(networkConfigAddress, taskSlotId);
+const tasks = await dacClient.getTasksByStatus(TaskStatus.Pending);
+
+// Nodes
+const nodeInfo = await dacClient.getNodeInfo(nodePubkey);
+const activeNodes = await dacClient.getNodesByStatus({ status: NodeStatus.Active });
+const publicNodes = await dacClient.getNodesByStatus({ 
+  status: NodeStatus.Active, 
+  nodeType: NodeType.Public 
+});
+
+// Contributions
+const contribution = await dacClient.getContribution(goalAddress, contributorAddress);
+```
+
+### Status Monitoring
+
+Monitor nodes and agents until they reach a specific status using WebSocket subscriptions.
 
 ```typescript
 import { DacSDK, WaitMode } from './dacClient';
@@ -80,6 +164,7 @@ const agents = await dacClient.waitForAgentsStatus(
 - `WaitMode.First`: Return when the first node/agent reaches the target status.
 
 ### IPFSClient
+
 Upload and download data from IPFS. Files are automatically added to MFS (Mutable File System).
 
 ```typescript
@@ -101,7 +186,7 @@ files.forEach(file => {
   console.log(file.gatewayUrl);
 });
 
-// List files in MFS (visible in WebUI)
+// List files in MFS
 const mfsFiles = await ipfsClient.listMfsFiles('/dac-uploads');
 ```
 
@@ -186,32 +271,4 @@ const activeNodes = await dacClient.waitForNodesStatus(
     waitMode: WaitMode.All
   }
 );
-```
-
-### Querying Data
-
-```typescript
-// Get network configuration
-const networkConfig = await dacClient.getNetworkConfig(authorityAddress);
-
-// Get agent by address
-const agent = await dacClient.getAgent(agentAddress);
-
-// Get agent by slot ID
-const agent = await dacClient.getAgentBySlot(networkConfigAddress, 0n);
-
-// Get all agents by status
-const pendingAgents = await dacClient.getAgentsByStatus(AgentStatus.Pending);
-const validatedAgents = await dacClient.getAgentsByStatus(AgentStatus.Validated);
-
-// Get all nodes by status
-const activeNodes = await dacClient.getNodesByStatus({ status: NodeStatus.Active });
-const publicNodes = await dacClient.getNodesByStatus({ 
-  status: NodeStatus.Active, 
-  nodeType: NodeType.Public 
-});
-
-// Get goal and task
-const goal = await dacClient.getGoal(networkConfigAddress, goalSlotId);
-const task = await dacClient.getTask(networkConfigAddress, taskSlotId);
 ```
