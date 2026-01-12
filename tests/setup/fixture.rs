@@ -248,13 +248,27 @@ impl TestFixture {
 
     pub fn with_set_goal(mut self, goal_slot_id: u64, agent_slot_id: u64) -> Self {
         let goal_owner = self.agent_owner.insecure_clone();
+        let network_config_pda = self.find_network_config_pda().0;
+        let goal = self.get_goal(&network_config_pda, goal_slot_id);
+
+        let network_config = self.get_network_config();
+        let mut task_slot_id = 0;
+
+        for i in 0..network_config.task_count {
+            let (task_pda, _) = self.find_task_pda(&network_config_pda, i);
+            if task_pda == goal.task {
+                task_slot_id = i;
+                break;
+            }
+        }
+        
         let result = self.set_goal(
             &goal_owner,
             goal_slot_id,
             crate::setup::test_data::DEFAULT_GOAL_SPECIFICATION_CID.to_string(),
             10,
             agent_slot_id,
-            0,
+            task_slot_id,
             DEFAULT_INITIAL_DEPOSIT,
         );
         assert!(result.is_ok(), "Failed to set goal");

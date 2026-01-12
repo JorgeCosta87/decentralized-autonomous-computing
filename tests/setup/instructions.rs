@@ -1,5 +1,5 @@
 use dac_client::instructions::{
-    ClaimConfidentialNodeBuilder, ClaimPublicNodeBuilder, ClaimTaskBuilder,
+    ActivateNodeBuilder, ClaimConfidentialNodeBuilder, ClaimPublicNodeBuilder, ClaimTaskBuilder,
     ContributeToGoalBuilder, CreateAgentBuilder, CreateGoalBuilder, InitializeNetworkBuilder,
     RegisterNodeBuilder, SetGoalBuilder, SubmitConfidentialTaskValidationBuilder,
     SubmitPublicTaskValidationBuilder, SubmitTaskResultBuilder, UpdateNetworkConfigBuilder,
@@ -55,6 +55,12 @@ pub trait Instructions {
         node: &Keypair,
         node_to_validate_pubkey: &Pubkey,
         approved: bool,
+    ) -> TransactionResult;
+
+    fn activate_node(
+        &mut self,
+        authority: &Keypair,
+        node_pubkey: &Pubkey,
     ) -> TransactionResult;
 
     fn validate_agent(
@@ -294,6 +300,25 @@ impl Instructions for TestFixture {
             .send_tx(&[builder.instruction()], &node_pubkey, &[node])
     }
 
+    fn activate_node(
+        &mut self,
+        authority: &Keypair,
+        node_pubkey: &Pubkey,
+    ) -> TransactionResult {
+        let authority_pubkey = authority.pubkey();
+        let network_config_pda = self.find_network_config_pda().0;
+        let (node_info_pda, _) = self.find_node_info_pda(node_pubkey);
+
+        let mut builder = ActivateNodeBuilder::new();
+        builder
+            .authority(authority_pubkey)
+            .network_config(network_config_pda)
+            .node_info(node_info_pda);
+
+        self.svm
+            .send_tx(&[builder.instruction()], &authority_pubkey, &[authority])
+    }
+
     fn create_agent(
         &mut self,
         agent_owner: &Keypair,
@@ -329,7 +354,9 @@ impl Instructions for TestFixture {
         let network_config_pda = self.find_network_config_pda().0;
         let network_config = self.get_network_config();
         let goal_slot_id = network_config.goal_count;
+        let task_slot_id = network_config.task_count;
         let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+        let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
 
         let mut builder = CreateGoalBuilder::new();
         builder
@@ -337,6 +364,7 @@ impl Instructions for TestFixture {
             .owner(owner_pubkey)
             .network_config(network_config_pda)
             .goal(goal_pda)
+            .task(task_pda)
             .is_owned(is_owned)
             .is_confidential(is_confidential);
 

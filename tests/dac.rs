@@ -289,6 +289,79 @@ fn test_claim_confidential_node() {
 }
 
 #[test]
+fn test_activate_node_public() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_public_node()
+        .with_claim_public_node();
+
+    let result = fixt.activate_node(
+        &fixt.authority.insecure_clone(),
+        &fixt.public_node.pubkey(),
+    );
+    match result {
+        Ok(_) => {
+            fixt.svm.print_transaction_logs(&result.unwrap());
+            let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
+            let network_config = fixt.get_network_config();
+
+            assert_eq!(node_info.status, NodeStatus::Active);
+            assert_eq!(network_config.public_node_count, 1);
+        }
+        Err(e) => panic!("Failed to activate public node: {:#?}", e),
+    }
+}
+
+#[test]
+fn test_activate_node_confidential() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_confidential_node()
+        .with_claim_confidential_node();
+
+    // Confidential nodes are already active after claim, so we need to test edge case
+    // For now, test that it works on a node that's already active (should fail)
+    let node_info_before = fixt.get_node_info(&fixt.confidential_node.pubkey());
+    assert_eq!(node_info_before.status, NodeStatus::Active);
+
+    // Test activating a node that's not in AwaitingValidation (should fail)
+    let result = fixt.activate_node(
+        &fixt.authority.insecure_clone(),
+        &fixt.confidential_node.pubkey(),
+    );
+    assert!(result.is_err(), "Should fail to activate already active node");
+}
+
+#[test]
+fn test_activate_node_invalid_status() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_public_node();
+    // Node is in PendingClaim, not AwaitingValidation
+
+    let result = fixt.activate_node(
+        &fixt.authority.insecure_clone(),
+        &fixt.public_node.pubkey(),
+    );
+    assert!(result.is_err(), "Should fail to activate node in PendingClaim status");
+}
+
+#[test]
+fn test_activate_node_unauthorized() {
+    let mut fixt = TestFixture::new()
+        .with_initialize_network()
+        .with_register_public_node()
+        .with_claim_public_node();
+
+    // Try to activate with non-authority account
+    let result = fixt.activate_node(
+        &fixt.public_node_owner.insecure_clone(),
+        &fixt.public_node.pubkey(),
+    );
+    assert!(result.is_err(), "Should fail when non-authority tries to activate");
+}
+
+#[test]
 fn test_validate_public_node() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
@@ -470,13 +543,28 @@ fn test_set_goal() {
     let goal_owner = fixt.create_keypair();
     let network_config_pda = fixt.find_network_config_pda().0;
 
+    let result1 = fixt.create_goal(&goal_owner, true, false);
+    assert!(result1.is_ok(), "Failed to create goal");
+
+    let goal = fixt.get_goal(&network_config_pda, 0);
+    let network_config = fixt.get_network_config();
+    let mut task_slot_id = 0;
+
+    for i in 0..network_config.task_count {
+        let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
+        if task_pda == goal.task {
+            task_slot_id = i;
+            break;
+        }
+    }
+
     let result2 = fixt.set_goal(
         &goal_owner,
         0,
         DEFAULT_GOAL_SPECIFICATION_CID.to_string(),
         10,
         0,
-        0,
+        task_slot_id,
         DEFAULT_INITIAL_DEPOSIT,
     );
 
@@ -486,8 +574,17 @@ fn test_set_goal() {
             let goal = fixt.get_goal(&network_config_pda, 0);
             let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
             let owner_contribution = fixt.get_contribution(&goal_pda, &goal_owner.pubkey());
-            let (task_pda, _) = fixt.find_task_pda(&network_config_pda, 0);
-            let task = fixt.get_task(&network_config_pda, 0);
+            let network_config = fixt.get_network_config();
+            let mut task_slot_id = 0;
+            for i in 0..network_config.task_count {
+                let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
+                if task_pda == goal.task {
+                    task_slot_id = i;
+                    break;
+                }
+            }
+            let (task_pda, _) = fixt.find_task_pda(&network_config_pda, task_slot_id);
+            let task = fixt.get_task(&network_config_pda, task_slot_id);
             let (agent_pda, _) = fixt.find_agent_pda(&network_config_pda, 0);
 
             assert_eq!(goal.owner, goal_owner.pubkey());
@@ -673,7 +770,19 @@ fn test_claim_task() {
         .with_set_goal(0, 0);
 
     let goal_slot_id = 0;
-    let task_slot_id = 0;
+    let network_config_pda = fixt.find_network_config_pda().0;
+    // Get the task that was created with the goal
+    let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+    let network_config = fixt.get_network_config();
+    let mut task_slot_id = 0;
+    // Find which task slot corresponds to the goal's task
+    for i in 0..network_config.task_count {
+        let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
+        if task_pda == goal.task {
+            task_slot_id = i;
+            break;
+        }
+    }
     let max_task_cost = 1_000_000_000;
 
     let result = fixt.claim_task(
@@ -723,7 +832,19 @@ fn test_submit_task_result() {
         .with_set_goal(0, 0);
 
     let goal_slot_id = 0;
-    let task_slot_id = 0;
+    let network_config_pda = fixt.find_network_config_pda().0;
+    // Get the task that was created with the goal
+    let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+    let network_config = fixt.get_network_config();
+    let mut task_slot_id = 0;
+    // Find which task slot corresponds to the goal's task
+    for i in 0..network_config.task_count {
+        let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
+        if task_pda == goal.task {
+            task_slot_id = i;
+            break;
+        }
+    }
     let max_task_cost = 1_000_000_000;
 
     let result = fixt.claim_task(
@@ -866,7 +987,19 @@ fn test_submit_confidential_task_validation_approved() {
     let goal_slot_id = network_config.goal_count - 1;
 
     let mut fixt = fixt.with_set_goal(goal_slot_id, 0);
-    let task_slot_id = 0;
+    // Get the task that was created with the goal
+    let network_config_pda = fixt.find_network_config_pda().0;
+    let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+    let network_config = fixt.get_network_config();
+    let mut task_slot_id = 0;
+    // Find which task slot corresponds to the goal's task
+    for i in 0..network_config.task_count {
+        let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
+        if task_pda == goal.task {
+            task_slot_id = i;
+            break;
+        }
+    }
     let max_task_cost = 1_000_000_000;
     let payment_amount = 500_000_000;
 
@@ -960,7 +1093,18 @@ fn test_confidential_task_validation_wrong_tee_signing_pubkey() {
     let mut fixt = fixt.with_set_goal(0, 0);
 
     let goal_slot_id = 0;
-    let task_slot_id = 0;
+    let network_config_pda = fixt.find_network_config_pda().0;
+    let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+    let network_config = fixt.get_network_config();
+    
+    let mut task_slot_id = 0;
+    for i in 0..network_config.task_count {
+        let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
+        if task_pda == goal.task {
+            task_slot_id = i;
+            break;
+        }
+    }
     let max_task_cost = 1_000_000_000;
     let payment_amount = 500_000_000;
 
