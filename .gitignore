@@ -10,5 +10,4 @@ clients/rust/
 clients/sdk/src/generated/
 old/
 
-*/keypairs.json
-**/test-keypairs/
+keypairs/
