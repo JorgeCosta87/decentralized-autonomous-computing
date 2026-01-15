@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::ErrorCode;
+use crate::events::TaskClaimed;
 use crate::state::{
     Goal, GoalStatus, NetworkConfig, NodeInfo, NodeStatus, NodeType, Task, TaskStatus,
 };
@@ -100,6 +101,13 @@ impl<'info> ClaimTask<'info> {
         // Reset task validation tracking for new execution
         self.task.approved_validators.clear();
         self.task.rejected_validators.clear();
+
+        emit!(TaskClaimed {
+            goal_slot_id: self.goal.goal_slot_id,
+            task_slot_id: self.task.task_slot_id,
+            compute_node: self.compute_node.key(),
+            max_task_cost,
+        });
 
         Ok(())
     }

@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
 use crate::errors::ErrorCode;
+use crate::events::ContributionMade;
 use crate::state::{Contribution, Goal, GoalStatus};
 use crate::NetworkConfig;
 
@@ -117,6 +118,14 @@ impl<'info> ContributeToGoal<'info> {
             .total_shares
             .checked_add(shares_to_mint)
             .ok_or(ErrorCode::Overflow)?;
+
+        emit!(ContributionMade {
+            goal_slot_id: self.goal.goal_slot_id,
+            contributor: self.contributor.key(),
+            deposit_amount,
+            shares_minted: shares_to_mint,
+            total_shares: self.goal.total_shares,
+        });
 
         Ok(())
     }

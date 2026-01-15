@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
 use crate::errors::ErrorCode;
+use crate::events::GoalSet;
 use crate::state::{Agent, AgentStatus, Contribution, Goal, GoalStatus, Task, TaskStatus};
 use crate::ActionType;
 use crate::NetworkConfig;
@@ -159,6 +160,16 @@ impl<'info> SetGoal<'info> {
         self.task.status = TaskStatus::Pending; // Task is pending for execution
         self.task.agent = self.agent.key();
         self.task.action_type = ActionType::Llm;
+
+        emit!(GoalSet {
+            goal_slot_id: self.goal.goal_slot_id,
+            owner: self.owner.key(),
+            agent_slot_id: self.agent.agent_slot_id,
+            task_slot_id: self.task.task_slot_id,
+            specification_cid: self.goal.specification_cid.clone(),
+            max_iterations: self.goal.max_iterations,
+            initial_deposit,
+        });
 
         Ok(())
     }

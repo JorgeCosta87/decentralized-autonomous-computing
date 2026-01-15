@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+use crate::events::AgentCreated;
 use crate::state::{Agent, AgentStatus, NetworkConfig};
 
 #[derive(Accounts)]
@@ -50,6 +51,12 @@ impl<'info> CreateAgent<'info> {
         });
 
         self.network_config.increment_agent_count()?;
+
+        emit!(AgentCreated {
+            agent_slot_id,
+            owner: self.agent_owner.key(),
+            agent_config_cid: self.agent.agent_config_cid.clone(),
+        });
 
         Ok(())
     }

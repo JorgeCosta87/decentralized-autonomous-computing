@@ -4,6 +4,7 @@ use anchor_lang::system_program;
 use sha2::{Digest, Sha256};
 
 use crate::errors::ErrorCode;
+use crate::events::{TaskValidationSubmitted, GoalCompleted, NodeValidated, NodeRejected};
 use crate::state::{
     Goal, GoalStatus, NetworkConfig, NodeInfo, NodeStatus, NodeType, Task, TaskStatus,
 };
@@ -107,8 +108,7 @@ impl<'info> SubmitTaskValidation<'info> {
         require!(!self.goal.is_confidential, ErrorCode::InvalidGoalStatus);
 
         require!(
-            self.validator_node_info.node_type == NodeType::Public
-                || self.validator_node_info.node_type == NodeType::Confidential,
+            self.validator_node_info.node_type == NodeType::Public,
             ErrorCode::InvalidNodeType
         );
         require!(
@@ -329,6 +329,13 @@ impl<'info> SubmitTaskValidation<'info> {
         if message.goal_completed {
             self.goal.status = GoalStatus::Ready;
             self.task.status = TaskStatus::Ready;
+            
+            // Emit goal completed event
+            emit!(GoalCompleted {
+                goal_slot_id: self.goal.goal_slot_id,
+                final_iteration: self.goal.current_iteration,
+                vault_balance: self.vault.lamports(),
+            });
         } else {
             self.task.status = TaskStatus::Pending;
         }
@@ -336,6 +343,27 @@ impl<'info> SubmitTaskValidation<'info> {
         // Reset validation tracking after successful processing
         self.task.approved_validators = Vec::new();
         self.task.rejected_validators = Vec::new();
+
+        // Emit node validated event
+        emit!(NodeValidated {
+            node: self.node_info.node_pubkey,
+            validator: self.node_validating.key(),
+            goal_slot_id: Some(self.goal.goal_slot_id),
+            task_slot_id: Some(self.task.task_slot_id),
+        });
+
+        // Emit task validation submitted event
+        emit!(TaskValidationSubmitted {
+            goal_slot_id: self.goal.goal_slot_id,
+            task_slot_id: self.task.task_slot_id,
+            validator: self.node_validating.key(),
+            payment_amount: message.payment_amount,
+            approved: message.approved,
+            goal_completed: message.goal_completed,
+            current_iteration: self.goal.current_iteration,
+            vault_balance: self.vault.lamports(),
+            locked_for_tasks: self.goal.locked_for_tasks,
+        });
 
         Ok(())
     }
@@ -365,6 +393,14 @@ impl<'info> SubmitTaskValidation<'info> {
 
         self.task.approved_validators = Vec::new();
         self.task.rejected_validators = Vec::new();
+
+        // Emit node rejected event
+        emit!(NodeRejected {
+            node: self.node_info.node_pubkey,
+            validator: self.node_validating.key(),
+            goal_slot_id: Some(self.goal.goal_slot_id),
+            task_slot_id: Some(self.task.task_slot_id),
+        });
 
         Ok(())
     }

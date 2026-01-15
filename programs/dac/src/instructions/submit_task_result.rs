@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::ErrorCode;
+use crate::events::TaskResultSubmitted;
 use crate::state::{Task, TaskStatus};
 use crate::Goal;
 
@@ -48,10 +49,18 @@ impl<'info> SubmitTaskResult<'info> {
         require!(output_cid.len() <= 128, ErrorCode::InvalidCID);
 
         //TODO: after the first interaction the peding_input will be the the current next_input_cid
-        self.task.pending_input_cid = Some(input_cid);
-        self.task.pending_output_cid = Some(output_cid);
-        self.task.next_input_cid = Some(next_input_cid);
+        self.task.pending_input_cid = Some(input_cid.clone());
+        self.task.pending_output_cid = Some(output_cid.clone());
+        self.task.next_input_cid = Some(next_input_cid.clone());
         self.task.status = TaskStatus::AwaitingValidation;
+
+        emit!(TaskResultSubmitted {
+            goal_slot_id: self.goal.goal_slot_id,
+            task_slot_id: self.task.task_slot_id,
+            input_cid,
+            output_cid,
+            next_input_cid,
+        });
 
         Ok(())
     }
