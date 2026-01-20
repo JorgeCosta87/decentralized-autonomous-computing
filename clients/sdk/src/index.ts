@@ -14,7 +14,7 @@ export type {
   NodeInfo,
   Task,
 } from './generated/dac/accounts/index.js';
-export type { CodeMeasurementArgs as CodeMeasurement } from './generated/dac/types/index.js';
+export type { CodeMeasurement, CodeMeasurementArgs } from './generated/dac/types/codeMeasurement.js';
 export { NodeType, NodeStatus, AgentStatus, TaskStatus, GoalStatus } from './generated/dac/types/index.js';
 export { DAC_PROGRAM_ID, deriveNetworkConfigAddress, deriveAgentAddress, deriveGoalAddress, deriveTaskAddress, deriveContributionAddress, deriveGoalVaultAddress } from './dac/dacPdas.js';
 export { getNodeStatusName, getAgentStatusName, getTaskStatusName, getGoalStatusName } from './dac/statusUtils.js';

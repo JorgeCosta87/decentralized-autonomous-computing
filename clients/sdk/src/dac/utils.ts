@@ -28,33 +28,6 @@ export function safeStringify(obj: any): string {
   }, 2);
 }
 
-/**
- * Extract error message from simulation error
- */
-export function extractSimulationError(simulation: any): string | null {
-  if (!simulation?.value?.err) {
-    return null;
-  }
-
-  const err = simulation.value.err;
-  
-  if (err.InstructionError) {
-    const [instructionIndex, instructionError] = err.InstructionError;
-    
-    if (instructionError.Custom) {
-      const errorCode = instructionError.Custom;
-      if (errorCode === 1) {
-        return 'MissingAccount (error code #1). This usually means one of the required accounts (goal, task, agent, or network_config) does not exist.';
-      }
-      return `Custom program error code: ${errorCode}`;
-    }
-    
-    return `Instruction ${instructionIndex} error: ${safeStringify(instructionError)}`;
-  }
-  
-  return safeStringify(err);
-}
-
 export async function buildTransaction(
   rpc: Rpc<any>,
   payer: TransactionSigner,

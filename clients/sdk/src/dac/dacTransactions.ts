@@ -30,7 +30,6 @@ import {
   type RegisterNodeAsyncInput,
   type UpdateNetworkConfigAsyncInput,
 } from '../generated/dac/instructions/index.js';
-import type { NodeType } from '../generated/dac/types/index.js';
 import { AgentStatus } from '../generated/dac/types/index.js';
 import { 
   fetchMaybeNetworkConfig,

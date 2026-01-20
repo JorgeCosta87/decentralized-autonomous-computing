@@ -5,7 +5,7 @@ import { createQueryService } from './dac/dacQueries.js';
 import { createTransactionService } from './dac/dacTransactions.js';
 import { createMonitoringService, WaitMode } from './dac/dacMonitoring.js';
 import { createSubscriptionService } from './dac/dacSubscriptions.js';
-import { safeStringify, extractSimulationError } from './dac/utils.js';
+import { safeStringify } from './dac/utils.js';
 import type {
   IQueryService,
   ITransactionService,
@@ -241,42 +241,6 @@ export class DacSDK {
     return { signature, base64Encoded };
   }
 
-  /**
-   * Simulate transaction to catch errors before sending
-   */
-  private async simulateTransaction(base64Encoded: string): Promise<void> {
-    try {
-      const simulation = await (this.rpc as any).simulateTransaction(base64Encoded, {
-        encoding: 'base64',
-        sigVerify: false,
-        replaceRecentBlockhash: false,
-      }).send();
-
-      if (simulation?.value?.err) {
-        const errorMessage = extractSimulationError(simulation);
-        const err = simulation.value.err;
-        
-        console.error('[signAndSendTransaction] Simulation failed:', safeStringify(err));
-        
-        if (simulation.value.logs && simulation.value.logs.length > 0) {
-          console.error('[signAndSendTransaction] Simulation logs:', simulation.value.logs.slice(0, 10));
-        }
-
-        throw new Error(
-          errorMessage 
-            ? `Transaction simulation failed: ${errorMessage}`
-            : `Transaction simulation failed: ${safeStringify(err)}`
-        );
-      }
-    } catch (error: any) {
-      if (error.message?.includes('Transaction simulation failed')) {
-        throw error;
-      }
-      
-      console.warn('[signAndSendTransaction] Simulation check encountered an error:', error.message);
-      console.warn('[signAndSendTransaction] Continuing with transaction send...');
-    }
-  }
 
   /**
    * Send transaction to the network
@@ -304,11 +268,10 @@ export class DacSDK {
   }
 
   /**
-   * Sign, simulate, and send a transaction
+   * Sign and send a transaction
    */
   private async signAndSendTransaction(transactionMessage: any): Promise<string> {
     const { signature, base64Encoded } = await this.signAndEncodeTransaction(transactionMessage);
-    await this.simulateTransaction(base64Encoded);
     return await this.sendTransaction(base64Encoded, signature);
   }
 
