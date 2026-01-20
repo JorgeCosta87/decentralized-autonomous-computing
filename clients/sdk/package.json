@@ -22,7 +22,14 @@
   ],
   "version": "1.0.0",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^9.35.0",
@@ -38,8 +45,11 @@
     "typescript-eslint": "^8.44.0"
   },
   "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "@solana/kit": "^5.4.0",
+    "@types/bs58": "^4.0.4",
+    "bs58": "^6.0.0",
     "esrun": "^3.2.30",
-    "gill": "0.11.0",
     "js-yaml": "^4.1.0",
     "kleur": "^4.1.5",
     "prompts": "^2.4.2",

@@ -1,9 +1,14 @@
-import type { Address } from 'gill';
-import { base64 } from '@coral-xyz/anchor/dist/cjs/utils/bytes/index.js';
+import type { Address } from '@solana/kit';
 
 /**
- * Decode accounts from getProgramAccounts response.
- * Uses the working pattern: base64.decode(account.data.toString())
+ * Decode base64 string to Uint8Array
+ */
+function decodeBase64(base64String: string): Uint8Array {
+  return new Uint8Array(Buffer.from(base64String, 'base64'));
+}
+
+/**
+ * Decode accounts from getProgramAccounts response
  */
 export function decodeAccountsFromResponse<T>(
   response: Array<{ 
@@ -22,7 +27,7 @@ export function decodeAccountsFromResponse<T>(
     const decoded = response.map(({ pubkey, account }) =>
       decodeFn({
         address: pubkey,
-        data: base64.decode(String(account.data)),
+        data: decodeBase64(String(account.data)),
         executable: account.executable,
         lamports: account.lamports,
         programAddress: account.owner,
@@ -32,6 +37,7 @@ export function decodeAccountsFromResponse<T>(
 
     return decoded.map((item) => item.data);
   } catch (error: any) {
+    console.error('Error decoding accounts', error);
     return [];
   }
 }

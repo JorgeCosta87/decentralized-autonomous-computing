@@ -1,4 +1,4 @@
-import type { Address, SolanaClient, TransactionSigner } from 'gill';
+import type { Address, Rpc, TransactionMessage, TransactionMessageWithFeePayer, TransactionMessageWithBlockhashLifetime } from '@solana/kit';
 import type {
   NetworkConfig,
   Agent,
@@ -9,12 +9,13 @@ import type {
 } from '../generated/dac/accounts/index.js';
 import type { NodeStatus, AgentStatus, TaskStatus, GoalStatus, NodeType, CodeMeasurementArgs } from '../generated/dac/types/index.js';
 import type { WaitMode } from './dacMonitoring.js';
+import type { TransactionSigner } from './utils.js';
 
 /**
  * Dependency container for DAC services
  */
 export interface DacServiceDeps {
-  client: SolanaClient;
+  rpc: Rpc<any>;
   programAddress: Address;
   getAuthority: () => Address | null;
 }
@@ -34,6 +35,23 @@ export interface IQueryService {
   getAgentsByStatus(status?: AgentStatus): Promise<Agent[]>;
   getTasksByStatus(status?: TaskStatus): Promise<Task[]>;
   getGoalsByStatus(status?: GoalStatus): Promise<Goal[]>;
+  
+  // Batch methods for efficient bulk operations
+  batchGetContributionsForGoals(
+    networkConfig: Address,
+    goalSlotIds: bigint[],
+    contributorAddress: Address
+  ): Promise<Map<bigint, Contribution | null>>;
+  
+  batchGetVaultBalances(
+    networkConfig: Address,
+    goalSlotIds: bigint[]
+  ): Promise<Map<bigint, { balance: bigint; rentExempt: bigint }>>;
+  
+  getContributorsForGoals(
+    networkConfig: Address,
+    goalSlotIds: bigint[]
+  ): Promise<Map<bigint, { count: number; contributors: Array<{ address: Address; shares: bigint }> }>>;
 }
 
 /**
@@ -108,16 +126,18 @@ export type ActivateNodeParams = {
 /**
  * Transaction service interface for write operations
  */
+type TransactionMessageType = TransactionMessage & TransactionMessageWithFeePayer<string> & TransactionMessageWithBlockhashLifetime;
+
 export interface ITransactionService {
-  initializeNetwork(params: InitializeNetworkParams): Promise<{ signature: string; networkConfigAddress: Address }>;
-  registerNode(params: RegisterNodeParams): Promise<{ signature: string; nodeInfoAddress: Address; nodeTreasuryAddress: Address }>;
-  createAgent(params: CreateAgentParams): Promise<{ signature: string; agentAddress: Address; agentSlotId: bigint }>;
-  createGoal(params: CreateGoalParams): Promise<{ signature: string; goalAddress: Address; goalSlotId: bigint; taskAddress: Address; taskSlotId: bigint }>;
-  setGoal(params: SetGoalParams): Promise<string>;
-  contributeToGoal(params: ContributeToGoalParams): Promise<string>;
-  withdrawFromGoal(params: WithdrawFromGoalParams): Promise<string>;
-  updateNetworkConfig(params: UpdateNetworkConfigParams): Promise<string>;
-  activateNode(params: ActivateNodeParams): Promise<string>;
+  initializeNetwork(params: InitializeNetworkParams): Promise<{ transactionMessage: TransactionMessageType; networkConfigAddress: Address }>;
+  registerNode(params: RegisterNodeParams): Promise<{ transactionMessage: TransactionMessageType; nodeInfoAddress: Address; nodeTreasuryAddress: Address }>;
+  createAgent(params: CreateAgentParams): Promise<{ transactionMessage: TransactionMessageType; agentAddress: Address; agentSlotId: bigint }>;
+  createGoal(params: CreateGoalParams): Promise<{ transactionMessage: TransactionMessageType; goalAddress: Address; goalSlotId: bigint; taskAddress: Address; taskSlotId: bigint }>;
+  setGoal(params: SetGoalParams): Promise<TransactionMessageType>;
+  contributeToGoal(params: ContributeToGoalParams): Promise<TransactionMessageType>;
+  withdrawFromGoal(params: WithdrawFromGoalParams): Promise<TransactionMessageType>;
+  updateNetworkConfig(params: UpdateNetworkConfigParams): Promise<TransactionMessageType>;
+  activateNode(params: ActivateNodeParams): Promise<TransactionMessageType>;
 }
 
 /**
@@ -147,4 +167,38 @@ export interface IMonitoringService {
     targetStatus: TaskStatus,
     options?: { timeoutMs?: number; waitMode?: WaitMode }
   ): Promise<Task[]>;
+}
+
+/**
+ * Subscription service interface for real-time event subscriptions
+ */
+export interface ISubscriptionService {
+  subscribeToGoalEvents(
+    networkConfig: Address,
+    goalSlotId: bigint,
+    callback: (event: import('./dacSubscriptions.js').GoalEvent) => void
+  ): Promise<() => void>;
+  
+  /**
+   * Subscribe to network-wide events (all events, not filtered by goal)
+   */
+  subscribeToNetworkEvents(
+    callback: (event: import('./dacSubscriptions.js').GoalEvent) => void
+  ): Promise<() => void>;
+  
+  /**
+   * Fetch historical events for a goal (and optionally a specific task)
+   */
+  fetchHistoricalEvents(
+    networkConfig: Address,
+    goalSlotId: bigint,
+    options?: import('./dacSubscriptions.js').FetchHistoricalEventsOptions
+  ): Promise<import('./dacSubscriptions.js').GoalEvent[]>;
+  
+  /**
+   * Fetch network-wide historical events
+   */
+  fetchNetworkHistoricalEvents(
+    options?: import('./dacSubscriptions.js').FetchHistoricalEventsOptions
+  ): Promise<import('./dacSubscriptions.js').GoalEvent[]>;
 }

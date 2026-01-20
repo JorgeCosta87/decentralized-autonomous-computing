@@ -1,5 +1,4 @@
-import type { Address } from 'gill';
-import { base64 } from '@coral-xyz/anchor/dist/cjs/utils/bytes/index.js';
+import { address, type Address } from '@solana/kit';
 import {
   decodeNodeInfo,
   decodeAgent,
@@ -47,7 +46,7 @@ async function waitForStatus<T, TStatus>(
     initialFoundItems?: Map<Address, T>;
   }
 ): Promise<T[]> {
-  const { client, programAddress } = deps;
+  const { rpc, programAddress } = deps;
   const waitMode = options?.waitMode ?? WaitMode.All;
   const foundItems = config.initialFoundItems ? new Map(config.initialFoundItems) : new Map<Address, T>();
   
@@ -102,20 +101,32 @@ async function waitForStatus<T, TStatus>(
       },
     ];
 
-    const notifications = await client.rpcSubscriptions
-      .programNotifications(programAddress, {
-        encoding: 'base64',
-        filters,
-        commitment: 'confirmed',
-      })
-      .subscribe({ abortSignal: abortController.signal });
+    // Use @solana/kit's programNotifications API for real-time monitoring
+    // We need RPC subscriptions - get the RPC URL from the RPC client
+    const rpcUrl = (rpc as any).transport?.url || 'http://localhost:8899';
+    const wsUrl = rpcUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+    
+    // Create RPC subscriptions client
+    const { createSolanaRpcSubscriptions_UNSTABLE } = await import('@solana/kit');
+    const rpcSubscriptions = createSolanaRpcSubscriptions_UNSTABLE(wsUrl);
+    
+    // Subscribe to program notifications with filters
+    // programNotifications returns a subscription that needs to be subscribed to
+    const subscription = rpcSubscriptions.programNotifications(programAddress, {
+      encoding: 'base64',
+      commitment: 'confirmed',
+      filters,
+    });
+    
+    // Subscribe and get the async iterable
+    const notifications = await subscription.subscribe({ abortSignal: abortController.signal });
 
     for await (const notification of notifications) {
       try {
         const accountInfo = notification.value.account;
         const encodedAccount = {
           address: notification.value.pubkey,
-          data: base64.decode(String(accountInfo.data)),
+          data: new Uint8Array(Buffer.from(String(accountInfo.data), 'base64')),
           executable: accountInfo.executable,
           owner: accountInfo.owner,
           lamports: accountInfo.lamports,
@@ -214,7 +225,7 @@ export function createMonitoringService(
           statusOffset: 73,
           decode: decodeNodeInfo,
           getKey: (node) => node.nodePubkey,
-          getAccountKey: (notification) => notification.value.pubkey,
+          getAccountKey: (notification) => address(notification.value.pubkey),
           entityName: 'node',
         }
       );
@@ -229,7 +240,7 @@ export function createMonitoringService(
       
       const foundAgents = new Map<Address, Agent>();
       for (const agentAddress of agentAddresses) {
-        const agent = await queryService.getAgent(agentAddress);
+        const agent = await queryService.getAgent(address(agentAddress));
         if (agent && agent.status === targetStatus) {
           foundAgents.set(agentAddress, agent);
         }
@@ -255,7 +266,7 @@ export function createMonitoringService(
           statusOffset: 48,
           decode: decodeAgent,
           getKey: (_agent) => '' as Address,
-          getAccountKey: (notification) => notification.value.pubkey,
+          getAccountKey: (notification) => address(notification.value.pubkey),
           entityName: 'agent',
           initialFoundItems: foundAgents,
         }
@@ -279,7 +290,7 @@ export function createMonitoringService(
           statusOffset: 8 + 8 + 32 + 32 + 32,
           decode: decodeGoal,
           getKey: (_goal) => '' as Address,
-          getAccountKey: (notification) => notification.value.pubkey,
+          getAccountKey: (notification) => address(notification.value.pubkey),
           entityName: 'goal',
         }
       );
@@ -302,7 +313,7 @@ export function createMonitoringService(
           statusOffset: 49,
           decode: decodeTask,
           getKey: (_task) => '' as Address,
-          getAccountKey: (notification) => notification.value.pubkey,
+          getAccountKey: (notification) => address(notification.value.pubkey),
           entityName: 'task',
         }
       );

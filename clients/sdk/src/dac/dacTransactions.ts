@@ -1,6 +1,9 @@
-import type { Address, TransactionSigner, Instruction } from 'gill';
-import { AccountRole } from 'gill';
-import { sendTransaction } from './utils.js';
+import { address, type Address } from '@solana/kit';
+import type { Instruction, TransactionMessage, TransactionMessageWithFeePayer, TransactionMessageWithBlockhashLifetime } from '@solana/kit';
+import { AccountRole } from '@solana/kit';
+import { buildTransaction, type TransactionSigner } from './utils.js';
+
+type TransactionMessageType = TransactionMessage & TransactionMessageWithFeePayer<string> & TransactionMessageWithBlockhashLifetime;
 import {
   deriveNetworkConfigAddress,
   deriveAgentAddress,
@@ -28,7 +31,13 @@ import {
   type UpdateNetworkConfigAsyncInput,
 } from '../generated/dac/instructions/index.js';
 import type { NodeType } from '../generated/dac/types/index.js';
-import { fetchMaybeNetworkConfig } from '../generated/dac/accounts/index.js';
+import { AgentStatus } from '../generated/dac/types/index.js';
+import { 
+  fetchMaybeNetworkConfig,
+  fetchMaybeGoal,
+  fetchMaybeTask,
+  fetchMaybeAgent,
+} from '../generated/dac/accounts/index.js';
 import type {
   ITransactionService,
   DacServiceDeps,
@@ -47,13 +56,24 @@ import type {
  * Create transaction service factory
  */
 export function createTransactionService(deps: DacServiceDeps): ITransactionService {
-  const { client, programAddress } = deps;
+  const { rpc, programAddress } = deps;
+  
+  /**
+   * Helper function to build transactions using the RPC from the service deps
+   * This avoids passing rpc to every transaction method
+   */
+  async function buildTransactionWithRpc(
+    payer: TransactionSigner,
+    instructions: Instruction[]
+  ) {
+    return buildTransaction(rpc, payer, instructions);
+  }
 
   return {
-    async initializeNetwork(params: InitializeNetworkParams): Promise<{ signature: string; networkConfigAddress: Address }> {
+    async initializeNetwork(params: InitializeNetworkParams): Promise<{ transactionMessage: TransactionMessageType; networkConfigAddress: Address }> {
       const networkConfigAddress = await deriveNetworkConfigAddress(
         programAddress,
-        params.authority.address
+        address(params.authority.address)
       );
 
       const remainingAccounts: Address[] = [];
@@ -69,7 +89,7 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
       }
 
       const input: InitializeNetworkInput = {
-        authority: params.authority,
+        authority: address(params.authority.address) as any,
         networkConfig: networkConfigAddress,
         cidConfig: params.cidConfig,
         allocateGoals: params.allocateGoals,
@@ -95,14 +115,14 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         accounts: allAccounts as any,
       };
 
-      const signature = await sendTransaction(client, params.authority, [instructionWithRemainingAccounts]);
+      const { transactionMessage } = await buildTransactionWithRpc(params.authority, [instructionWithRemainingAccounts]);
 
-      return { signature, networkConfigAddress };
+      return { transactionMessage, networkConfigAddress };
     },
 
-    async registerNode(params: RegisterNodeParams): Promise<{ signature: string; nodeInfoAddress: Address; nodeTreasuryAddress: Address }> {
+    async registerNode(params: RegisterNodeParams): Promise<{ transactionMessage: TransactionMessageType; nodeInfoAddress: Address; nodeTreasuryAddress: Address }> {
       const input: RegisterNodeAsyncInput = {
-        owner: params.owner,
+        owner: address(params.owner.address) as any,
         networkConfig: params.networkConfig,
         nodePubkey: params.nodePubkey,
         nodeType: params.nodeType,
@@ -112,16 +132,16 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         programAddress,
       });
 
-      const nodeInfoAddress = instruction.accounts[2].address;
-      const nodeTreasuryAddress = instruction.accounts[3].address;
+      const nodeInfoAddress = address(instruction.accounts[2].address);
+      const nodeTreasuryAddress = address(instruction.accounts[3].address);
 
-      const signature = await sendTransaction(client, params.owner, [instruction]);
+      const { transactionMessage } = await buildTransactionWithRpc(params.owner, [instruction]);
 
-      return { signature, nodeInfoAddress, nodeTreasuryAddress };
+      return { transactionMessage, nodeInfoAddress, nodeTreasuryAddress };
     },
 
-    async createAgent(params: CreateAgentParams): Promise<{ signature: string; agentAddress: Address; agentSlotId: bigint }> {
-      const networkConfigAccount = await fetchMaybeNetworkConfig(client.rpc, params.networkConfig);
+    async createAgent(params: CreateAgentParams): Promise<{ transactionMessage: TransactionMessageType; agentAddress: Address; agentSlotId: bigint }> {
+      const networkConfigAccount = await fetchMaybeNetworkConfig(rpc, params.networkConfig);
       if (!networkConfigAccount.exists || !networkConfigAccount.data) {
         throw new Error('Network config not found');
       }
@@ -134,7 +154,7 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
       );
 
       const input: CreateAgentInput = {
-        agentOwner: params.agentOwner,
+        agentOwner: address(params.agentOwner.address) as any,
         networkConfig: params.networkConfig,
         agent: agentAddress,
         agentConfigCid: params.agentConfigCid,
@@ -144,13 +164,13 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         programAddress,
       });
 
-      const signature = await sendTransaction(client, params.agentOwner, [instruction]);
+      const { transactionMessage } = await buildTransactionWithRpc(params.agentOwner, [instruction]);
 
-      return { signature, agentAddress, agentSlotId };
+      return { transactionMessage, agentAddress, agentSlotId };
     },
 
-    async createGoal(params: CreateGoalParams): Promise<{ signature: string; goalAddress: Address; goalSlotId: bigint; taskAddress: Address; taskSlotId: bigint }> {
-      const account = await fetchMaybeNetworkConfig(client.rpc, params.networkConfig);
+    async createGoal(params: CreateGoalParams): Promise<{ transactionMessage: TransactionMessageType; goalAddress: Address; goalSlotId: bigint; taskAddress: Address; taskSlotId: bigint }> {
+      const account = await fetchMaybeNetworkConfig(rpc, params.networkConfig);
       if (!account.exists || !account.data) {
         throw new Error('Network config not found');
       }
@@ -162,8 +182,8 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
       const taskAddress = await deriveTaskAddress(programAddress, params.networkConfig, taskSlotId);
 
       const input: CreateGoalInput = {
-        payer: params.payer,
-        owner: params.owner,
+        payer: address(params.payer.address) as any,
+        owner: address(params.owner.address) as any,
         networkConfig: params.networkConfig,
         goal: goalAddress,
         task: taskAddress,
@@ -175,18 +195,53 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         programAddress,
       });
 
-      const signature = await sendTransaction(client, params.payer, [instruction]);
+      const { transactionMessage } = await buildTransactionWithRpc(params.payer, [instruction]);
 
-      return { signature, goalAddress, goalSlotId, taskAddress, taskSlotId };
+      return { transactionMessage, goalAddress, goalSlotId, taskAddress, taskSlotId };
     },
 
-    async setGoal(params: SetGoalParams): Promise<string> {
+    async setGoal(params: SetGoalParams): Promise<TransactionMessageType> {
       const goalAddress = await deriveGoalAddress(programAddress, params.networkConfig, params.goalSlotId);
       const agentAddress = await deriveAgentAddress(programAddress, params.networkConfig, params.agentSlotId);
       const taskAddress = await deriveTaskAddress(programAddress, params.networkConfig, params.taskSlotId);
 
+
+      // Check if accounts exist using the proper fetch functions
+      try {
+        const goalAccount = await fetchMaybeGoal(rpc, goalAddress);
+        if (!goalAccount.exists) {
+          throw new Error(`Goal account does not exist for slotId ${params.goalSlotId.toString()}. Make sure the goal was created first.`);
+        }
+      } catch (error: any) {
+        console.error('[setGoal] Error checking goal account:', error);
+        throw new Error(`Failed to check goal account: ${error.message}`);
+      }
+
+      try {
+        const taskAccount = await fetchMaybeTask(rpc, taskAddress);
+        if (!taskAccount.exists) {
+          throw new Error(`Task account does not exist for slotId ${params.taskSlotId.toString()}. Make sure the task was created first.`);
+        }
+      } catch (error: any) {
+        console.error('[setGoal] Error checking task account:', error);
+        throw new Error(`Failed to check task account: ${error.message}`);
+      }
+
+      try {
+        const agentAccount = await fetchMaybeAgent(rpc, agentAddress);
+        if (!agentAccount.exists) {
+          throw new Error(`Agent account does not exist for slotId ${params.agentSlotId.toString()}. Make sure the agent was created and activated first.`);
+        }
+        if (agentAccount.data && agentAccount.data.status !== AgentStatus.Active) {
+          throw new Error(`Agent is not active. Current status: ${agentAccount.data.status}. The agent must be activated before setting a goal.`);
+        }
+      } catch (error: any) {
+        console.error('[setGoal] Error checking agent account:', error);
+        throw new Error(`Failed to check agent account: ${error.message}`);
+      }
+
       const input: SetGoalAsyncInput = {
-        owner: params.owner,
+        owner: address(params.owner.address) as any,
         goal: goalAddress,
         task: taskAddress,
         agent: agentAddress,
@@ -200,14 +255,15 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         programAddress,
       });
 
-      return await sendTransaction(client, params.owner, [instruction]);
+      const { transactionMessage } = await buildTransactionWithRpc(params.owner, [instruction]);
+      return transactionMessage;
     },
 
-    async contributeToGoal(params: ContributeToGoalParams): Promise<string> {
+    async contributeToGoal(params: ContributeToGoalParams): Promise<TransactionMessageType> {
       const goalAddress = await deriveGoalAddress(programAddress, params.networkConfig, params.goalSlotId);
 
       const input: ContributeToGoalAsyncInput = {
-        contributor: params.contributor,
+        contributor: address(params.contributor.address) as any,
         goal: goalAddress,
         networkConfig: params.networkConfig,
         depositAmount: params.depositAmount,
@@ -217,14 +273,15 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         programAddress,
       });
 
-      return await sendTransaction(client, params.contributor, [instruction]);
+      const { transactionMessage } = await buildTransactionWithRpc(params.contributor, [instruction]);
+      return transactionMessage;
     },
 
-    async withdrawFromGoal(params: WithdrawFromGoalParams): Promise<string> {
+    async withdrawFromGoal(params: WithdrawFromGoalParams): Promise<TransactionMessageType> {
       const goalAddress = await deriveGoalAddress(programAddress, params.networkConfig, params.goalSlotId);
 
       const input: WithdrawFromGoalAsyncInput = {
-        contributor: params.contributor,
+        contributor: address(params.contributor.address) as any,
         goal: goalAddress,
         networkConfig: params.networkConfig,
         sharesToBurn: params.sharesToBurn,
@@ -234,17 +291,18 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         programAddress,
       });
 
-      return await sendTransaction(client, params.contributor, [instruction]);
+      const { transactionMessage } = await buildTransactionWithRpc(params.contributor, [instruction]);
+      return transactionMessage;
     },
 
-    async updateNetworkConfig(params: UpdateNetworkConfigParams): Promise<string> {
+    async updateNetworkConfig(params: UpdateNetworkConfigParams): Promise<TransactionMessageType> {
       const networkConfigAddress = await deriveNetworkConfigAddress(
         programAddress,
-        params.authority.address
+        address(params.authority.address)
       );
 
       const input: UpdateNetworkConfigAsyncInput = {
-        authority: params.authority,
+        authority: address(params.authority.address) as any,
         networkConfig: networkConfigAddress,
         cidConfig: params.cidConfig ?? null,
         newCodeMeasurement: params.newCodeMeasurement ?? null,
@@ -254,13 +312,14 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         programAddress,
       });
 
-      return await sendTransaction(client, params.authority, [instruction]);
+      const { transactionMessage } = await buildTransactionWithRpc(params.authority, [instruction]);
+      return transactionMessage;
     },
 
-    async activateNode(params: ActivateNodeParams): Promise<string> {
+    async activateNode(params: ActivateNodeParams): Promise<TransactionMessageType> {
       const networkConfigAddress = await deriveNetworkConfigAddress(
         programAddress,
-        params.authority.address
+        address(params.authority.address)
       );
       const nodeInfoAddress = await deriveNodeInfoAddress(
         programAddress,
@@ -269,7 +328,7 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
 
       const instruction = getActivateNodeInstruction(
         {
-          authority: params.authority,
+          authority: address(params.authority.address) as any,
           networkConfig: networkConfigAddress,
           nodeInfo: nodeInfoAddress,
         },
@@ -278,7 +337,8 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         }
       );
 
-      return await sendTransaction(client, params.authority, [instruction]);
+      const { transactionMessage } = await buildTransactionWithRpc(params.authority, [instruction]);
+      return transactionMessage;
     },
   };
 }
