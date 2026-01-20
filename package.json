@@ -5,8 +5,7 @@
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.32.1",
-    "gill": "^0.14.0"
+    "@coral-xyz/anchor": "^0.32.1"
   },
   "devDependencies": {
     "@codama/nodes-from-anchor": "^1.2.9",

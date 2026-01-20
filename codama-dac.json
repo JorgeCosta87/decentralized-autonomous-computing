@@ -5,23 +5,7 @@
         "js": {
             "from": "@codama/renderers-js",
             "args": [
-                "clients/sdk/src/generated/dac",
-                {
-                    "dependencyMap": {
-                        "solanaAccounts": "gill",
-                        "solanaAddresses": "gill",
-                        "solanaCodecsCore": "gill",
-                        "solanaCodecsDataStructures": "gill",
-                        "solanaCodecsNumbers": "gill",
-                        "solanaCodecsStrings": "gill",
-                        "solanaErrors": "gill",
-                        "solanaInstructions": "gill",
-                        "solanaOptions": "gill",
-                        "solanaPrograms": "gill",
-                        "solanaRpcTypes": "gill",
-                        "solanaSigners": "gill"
-                    }
-                }
+                "clients/sdk/src/generated/dac"
             ]
         },
         "rust": {

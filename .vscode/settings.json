@@ -1,9 +1,97 @@
 {
-    "rust-analyzer.linkedProjects": [
-      "Cargo.toml",
-      "agent-network/Cargo.toml"
-    ],
-    "rust-analyzer.cargo.buildScripts.enable": true,
-    "rust-analyzer.checkOnSave.enable": true
-  }
+  // ============================================================================
+  // Rust-Analyzer Optimizations (reduces 3.3GB → 400-600MB)
+  // ============================================================================
+  "rust-analyzer.memory.dropLeast": 20,
+  "rust-analyzer.checkOnSave.enable": false,
+  "rust-analyzer.assist.allowMergingIntoFutureUses": false,
+  "rust-analyzer.cargo.buildScripts.enable": false,
+  "rust-analyzer.cargo.allFeatures": false,
+  "rust-analyzer.cargo.features": [],
+  "rust-analyzer.procMacro.enable": true,
+  "rust-analyzer.inlayHints.enable": false,
+  "rust-analyzer.lens.enable": false,
+  "rust-analyzer.completion.autoimport.enable": true,
+  "rust-analyzer.diagnostics.enable": true,
+  "rust-analyzer.hover.actions.enable": false,
+
+  "rust-analyzer.linkedProjects": [
+    "Cargo.toml",
+    "agent-network/Cargo.toml"
+  ],
   
+  // Exclude large directories from rust-analyzer indexing
+  "rust-analyzer.files.excludeDirs": [
+    "**/target",
+    "**/node_modules",
+    "**/build",
+    "**/dist",
+    "**/.git",
+    "**/test-ledger",
+    "**/tmp",
+    "**/old"
+  ],
+  
+  // ============================================================================
+  // TypeScript/JavaScript Optimizations (reduces 700MB → 200-300MB)
+  // ============================================================================
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "typescript.preferences.includePackageJsonAutoImports": "off",
+  "typescript.suggest.autoImports": true,
+  "typescript.suggest.enabled": true,
+  "typescript.validate.enable": true,
+  "typescript.tsserver.maxTsServerMemory": 2048,
+  "typescript.tsserver.watchOptions": {
+    "excludeDirectories": [
+      "**/node_modules",
+      "**/target",
+      "**/dist",
+      "**/build",
+      "**/.git",
+      "**/test-ledger",
+      "**/tmp",
+      "**/old"
+    ]
+  },
+  
+  // Disable expensive TypeScript features
+  "typescript.suggest.completeFunctionCalls": false,
+  "typescript.suggest.completeJSDocs": false,
+  "typescript.preferences.quoteStyle": "single",
+  
+  // ============================================================================
+  // General Editor Optimizations
+  // ============================================================================
+  "files.watcherExclude": {
+    "**/target/**": true,
+    "**/node_modules/**": true,
+    "**/.git/**": true,
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/test-ledger/**": true,
+    "**/tmp/**": true,
+    "**/old/**": true
+  },
+  
+  "search.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "**/.git": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/test-ledger": true,
+    "**/tmp": true,
+    "**/old": true
+  },
+  
+  // Reduce file watching overhead
+  "files.watcherInclude": [
+    "**/*.rs",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    "**/Cargo.toml",
+    "**/tsconfig.json"
+  ]
+}
