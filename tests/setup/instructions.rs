@@ -121,7 +121,6 @@ pub trait Instructions {
         task_slot_id: u64,
         input_cid: String,
         output_cid: String,
-        next_input_cid: String,
     ) -> TransactionResult;
 
     fn submit_confidential_task_validation(
@@ -500,7 +499,6 @@ impl Instructions for TestFixture {
         task_slot_id: u64,
         input_cid: String,
         output_cid: String,
-        next_input_cid: String,
     ) -> TransactionResult {
         let compute_node_pubkey = compute_node.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
@@ -531,8 +529,7 @@ impl Instructions for TestFixture {
             .goal(goal_pda)
             .network_config(network_config_pda)
             .input_cid(input_cid)
-            .output_cid(output_cid)
-            .next_input_cid(next_input_cid);
+            .output_cid(output_cid);
 
         self.svm.send_tx(
             &[builder.instruction()],

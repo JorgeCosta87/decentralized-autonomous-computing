@@ -122,10 +122,8 @@ pub mod dac {
         ctx: Context<SubmitTaskResult>,
         input_cid: String,
         output_cid: String,
-        next_input_cid: String,
     ) -> Result<()> {
-        ctx.accounts
-            .submit_task_result(input_cid, output_cid, next_input_cid)
+        ctx.accounts.submit_task_result(input_cid, output_cid)
     }
 
     // Note: submit_confidential_task_validation handles TEE-based validation (requires Ed25519 instruction)

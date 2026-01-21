@@ -603,9 +603,7 @@ fn test_set_goal() {
             assert_eq!(owner_contribution.shares, DEFAULT_INITIAL_DEPOSIT);
             assert_eq!(owner_contribution.refund_amount, 0);
 
-            let (agent_pda, _) = fixt.find_agent_pda(&network_config_pda, 0);
             assert_eq!(task.status, TaskStatus::Pending);
-            assert_eq!(task.agent, agent_pda);
             assert_eq!(task.action_type, ActionType::Llm);
         }
         Err(e) => panic!("Failed to set goal: {:#?}", e),
@@ -857,14 +855,12 @@ fn test_submit_task_result() {
 
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
-    let next_input_cid = "QmTestNextInput123456789".to_string();
 
     let result = fixt.submit_task_result(
         &fixt.public_node.insecure_clone(),
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
-        next_input_cid.clone(),
     );
 
     match result {
@@ -918,13 +914,11 @@ fn test_submit_public_task_validation_approved() {
 
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
-    let next_input_cid = "QmTestNextInput123456789".to_string();
     let result = fixt.submit_task_result(
         &fixt.public_node.insecure_clone(),
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
-        next_input_cid.clone(),
     );
     assert!(result.is_ok(), "Failed to submit task result");
 
@@ -1013,13 +1007,11 @@ fn test_submit_confidential_task_validation_approved() {
 
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
-    let next_input_cid = "QmTestNextInput123456789".to_string();
     let result = fixt.submit_task_result(
         &fixt.confidential_node.insecure_clone(),
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
-        next_input_cid.clone(),
     );
     assert!(result.is_ok(), "Failed to submit task result");
 
@@ -1118,13 +1110,11 @@ fn test_confidential_task_validation_wrong_tee_signing_pubkey() {
 
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
-    let next_input_cid = "QmTestNextInput123456789".to_string();
     let result = fixt.submit_task_result(
         &fixt.confidential_node.insecure_clone(),
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
-        next_input_cid.clone(),
     );
     assert!(result.is_ok(), "Failed to submit task result");
 

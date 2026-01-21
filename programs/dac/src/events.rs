@@ -14,7 +14,6 @@ pub struct TaskResultSubmitted {
     pub task_slot_id: u64,
     pub input_cid: String,
     pub output_cid: String,
-    pub next_input_cid: String,
 }
 
 #[event]

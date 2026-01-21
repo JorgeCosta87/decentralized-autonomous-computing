@@ -35,7 +35,6 @@ impl<'info> SubmitTaskResult<'info> {
         &mut self,
         input_cid: String,
         output_cid: String,
-        next_input_cid: String,
     ) -> Result<()> {
         require!(
             self.task.status == TaskStatus::Processing,
@@ -48,10 +47,9 @@ impl<'info> SubmitTaskResult<'info> {
         require!(input_cid.len() <= 128, ErrorCode::InvalidCID);
         require!(output_cid.len() <= 128, ErrorCode::InvalidCID);
 
-        //TODO: after the first interaction the peding_input will be the the current next_input_cid
+        // Store current execution results as pending (awaiting validation)
         self.task.pending_input_cid = Some(input_cid.clone());
         self.task.pending_output_cid = Some(output_cid.clone());
-        self.task.next_input_cid = Some(next_input_cid.clone());
         self.task.status = TaskStatus::AwaitingValidation;
 
         emit!(TaskResultSubmitted {
@@ -59,7 +57,6 @@ impl<'info> SubmitTaskResult<'info> {
             task_slot_id: self.task.task_slot_id,
             input_cid,
             output_cid,
-            next_input_cid,
         });
 
         Ok(())

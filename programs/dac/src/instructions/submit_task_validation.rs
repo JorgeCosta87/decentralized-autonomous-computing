@@ -108,7 +108,8 @@ impl<'info> SubmitTaskValidation<'info> {
         require!(!self.goal.is_confidential, ErrorCode::InvalidGoalStatus);
 
         require!(
-            self.validator_node_info.node_type == NodeType::Public,
+            self.validator_node_info.node_type == NodeType::Public
+            || self.validator_node_info.node_type == NodeType::Confidential,
             ErrorCode::InvalidNodeType
         );
         require!(
@@ -269,6 +270,7 @@ impl<'info> SubmitTaskValidation<'info> {
         hasher.update(&self.task.execution_count.to_le_bytes());
         self.task.chain_proof = hasher.finalize().into();
 
+        // Move pending to validated (these become the historical record)
         self.task.input_cid = self.task.pending_input_cid.take();
         self.task.output_cid = self.task.pending_output_cid.take();
 
@@ -387,6 +389,7 @@ impl<'info> SubmitTaskValidation<'info> {
             .checked_sub(self.task.max_task_cost)
             .ok_or(ErrorCode::Underflow)?;
 
+        // Clear pending fields (task will be reset for next claim)
         self.task.pending_input_cid = None;
         self.task.pending_output_cid = None;
         self.task.status = TaskStatus::Ready;

@@ -158,7 +158,6 @@ impl<'info> SetGoal<'info> {
         self.goal.task_index_at_goal_start = self.task.execution_count;
 
         self.task.status = TaskStatus::Pending; // Task is pending for execution
-        self.task.agent = self.agent.key();
         self.task.action_type = ActionType::Llm;
 
         emit!(GoalSet {
