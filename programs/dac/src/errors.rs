@@ -34,8 +34,6 @@ pub enum ErrorCode {
     InvalidValidatorTeeSigningPubkey,
     #[msg("Invalid compute node pubkey")]
     InvalidComputeNodePubkey,
-    #[msg("Invalid goal status")]
-    InvalidGoalStatus,
     #[msg("Underflow")]
     Underflow,
     #[msg("Insufficient balance")]
@@ -43,7 +41,7 @@ pub enum ErrorCode {
     #[msg("Deposit too small")]
     DepositTooSmall,
     #[msg("Invalid goal owner")]
-    InvalidGoalOwner,
+    InvalidSessionOwner,
     #[msg("Invalid task status")]
     InvalidTaskStatus,
     #[msg("Invalid agent status")]
@@ -58,4 +56,14 @@ pub enum ErrorCode {
     InvalidAuthority,
     #[msg("Duplicate validation")]
     DuplicateValidation,
+    #[msg("No approved nodes available for task assignment")]
+    NoApprovedNodes,
+    #[msg("Validator was not assigned to this task")]
+    ValidatorNotAssigned,
+    #[msg("Not enough approved nodes to assign required validators")]
+    NotEnoughValidators,
+    #[msg("Invalid session")]
+    InvalidSession,
+    #[msg("Invalid session status")]
+    InvalidSessionStatus,
 }

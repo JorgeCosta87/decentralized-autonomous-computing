@@ -1,10 +1,10 @@
 use anchor_lang::prelude::*;
 
-use crate::state::{Goal, GoalStatus, NetworkConfig, Task, TaskStatus};
-use crate::ActionType;
+use crate::state::{NetworkConfig, Session, SessionStatus, Task, TaskStatus};
+use crate::TaskType;
 
 #[derive(Accounts)]
-pub struct CreateGoal<'info> {
+pub struct CreateSession<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
 
@@ -21,15 +21,15 @@ pub struct CreateGoal<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + Goal::INIT_SPACE,
+        space = 8 + Session::INIT_SPACE,
         seeds = [
-            b"goal",
+            b"session",
             network_config.key().as_ref(),
-            network_config.next_goal_slot_id().to_le_bytes().as_ref()
+            network_config.next_session_slot_id().to_le_bytes().as_ref()
         ],
         bump,
     )]
-    pub goal: Account<'info, Goal>,
+    pub session: Account<'info, Session>,
 
     #[account(
         init,
@@ -47,16 +47,15 @@ pub struct CreateGoal<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> CreateGoal<'info> {
-    pub fn create_goal(
+impl<'info> CreateSession<'info> {
+    pub fn create_session(
         &mut self,
         is_owned: bool,
         is_confidential: bool,
-        bumps: &CreateGoalBumps,
+        bumps: &CreateSessionBumps,
     ) -> Result<()> {
-        let goal_slot_id = self.network_config.next_goal_slot_id();
+        let session_slot_id = self.network_config.next_session_slot_id();
         let task_slot_id = self.network_config.next_task_slot_id();
-        let genesis_hash = self.network_config.genesis_hash;
 
         let owner = if is_owned {
             self.owner.key()
@@ -64,14 +63,32 @@ impl<'info> CreateGoal<'info> {
             Pubkey::default()
         };
 
-        // Initialize task
+        self.session.set_inner(Session {
+            session_slot_id,
+            owner,
+            task: self.task.key(),
+            status: SessionStatus::Pending,
+            is_confidential,
+            max_iterations: 0,
+            current_iteration: 0,
+            task_index_start: 0,
+            task_index_end: 0,
+            total_shares: 0,
+            locked_for_tasks: 0,
+            specification_cid: "".to_string(),
+            state_cid: None,
+            vault_bump: 0,
+            bump: bumps.session,
+        });
+
         self.task.set_inner(Task {
             task_slot_id,
+            session_slot_id: Some(session_slot_id),
             status: TaskStatus::Ready,
             compute_node: None,
-            action_type: ActionType::Llm,
-            chain_proof: genesis_hash,
-            execution_count: 0,
+            task_type: TaskType::Completion(0),
+            chain_proof: [0u8; 32],
+            task_index: 0,
             max_task_cost: 0,
             max_call_count: 0,
             call_count: 0,
@@ -79,33 +96,11 @@ impl<'info> CreateGoal<'info> {
             output_cid: None,
             pending_input_cid: None,
             pending_output_cid: None,
-            approved_validators: Vec::new(),
-            rejected_validators: Vec::new(),
+            validations: Vec::new(),
             bump: bumps.task,
         });
 
-        // Initialize goal and link to task
-        self.goal.set_inner(Goal {
-            goal_slot_id,
-            owner,
-            agent: Pubkey::default(),
-            task: self.task.key(),
-            status: GoalStatus::Ready,
-            is_confidential,
-            max_iterations: 0,
-            current_iteration: 0,
-            task_index_at_goal_start: 0,
-            task_index_at_goal_end: 0,
-            total_shares: 0,
-            locked_for_tasks: 0,
-            chain_proof: genesis_hash,
-            specification_cid: "".to_string(),
-            state_cid: None,
-            vault_bump: 0,
-            bump: bumps.goal,
-        });
-
-        self.network_config.increment_goal_count()?;
+        self.network_config.increment_session_count()?;
         self.network_config.increment_task_count()?;
 
         Ok(())

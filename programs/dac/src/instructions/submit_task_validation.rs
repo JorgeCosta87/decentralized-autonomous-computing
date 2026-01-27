@@ -4,9 +4,10 @@ use anchor_lang::system_program;
 use sha2::{Digest, Sha256};
 
 use crate::errors::ErrorCode;
-use crate::events::{TaskValidationSubmitted, GoalCompleted, NodeValidated, NodeRejected};
+use crate::events::{SessionCompleted, TaskValidationSubmitted};
 use crate::state::{
-    Goal, GoalStatus, NetworkConfig, NodeInfo, NodeStatus, NodeType, Task, TaskStatus,
+    NetworkConfig, NodeInfo, NodeStatus, NodeType, Session, SessionStatus, Task, TaskStatus,
+    ValidationStatus,
 };
 use crate::utils::{check_validation_threshold, verify_tee_signature};
 
@@ -17,7 +18,7 @@ pub struct SubmitTaskValidationMessage {
     pub payment_amount: u64,
     pub validation_proof: [u8; 32],
     pub approved: bool,
-    pub goal_completed: bool,
+    pub session_completed: bool,
 }
 
 #[derive(Accounts)]
@@ -27,15 +28,15 @@ pub struct SubmitTaskValidation<'info> {
 
     #[account(
         mut,
-        seeds = [b"goal", network_config.key().as_ref(), goal.goal_slot_id.to_le_bytes().as_ref()],
-        bump = goal.bump,
+        seeds = [b"session", network_config.key().as_ref(), session.session_slot_id.to_le_bytes().as_ref()],
+        bump = session.bump,
     )]
-    pub goal: Account<'info, Goal>,
+    pub session: Account<'info, Session>,
 
     #[account(
         mut,
-        seeds = [b"goal_vault", goal.key().as_ref()],
-        bump = goal.vault_bump,
+        seeds = [b"session_vault", session.key().as_ref()],
+        bump = session.vault_bump,
     )]
     pub vault: SystemAccount<'info>,
 
@@ -84,7 +85,7 @@ impl<'info> SubmitTaskValidation<'info> {
     pub fn submit_confidential_task_validation(&mut self) -> Result<()> {
         self.validate_common_requirements()?;
 
-        require!(self.goal.is_confidential, ErrorCode::InvalidGoalStatus);
+        require!(self.session.is_confidential, ErrorCode::InvalidSessionStatus);
 
         let message = self.verify_confidential_validation()?;
 
@@ -105,33 +106,33 @@ impl<'info> SubmitTaskValidation<'info> {
     ) -> Result<()> {
         self.validate_common_requirements()?;
 
-        require!(!self.goal.is_confidential, ErrorCode::InvalidGoalStatus);
+        require!(!self.session.is_confidential, ErrorCode::InvalidSessionStatus);
 
         require!(
             self.validator_node_info.node_type == NodeType::Public
-            || self.validator_node_info.node_type == NodeType::Confidential,
+                || self.validator_node_info.node_type == NodeType::Confidential,
             ErrorCode::InvalidNodeType
         );
+        let validator_pubkey = self.node_validating.key();
+        let validator_entry = self
+            .task
+            .validations
+            .iter()
+            .find(|v| v.pubkey == validator_pubkey)
+            .ok_or(ErrorCode::ValidatorNotAssigned)?;
         require!(
-            !self
-                .task
-                .approved_validators
-                .contains(&self.node_validating.key())
-                && !self
-                    .task
-                    .rejected_validators
-                    .contains(&self.node_validating.key()),
+            validator_entry.status == ValidationStatus::Pending,
             ErrorCode::DuplicateValidation
         );
 
         if approved {
             let message = SubmitTaskValidationMessage {
-                goal_id: self.goal.goal_slot_id,
+                goal_id: self.session.session_slot_id,
                 task_slot_id: self.task.task_slot_id,
                 payment_amount,
                 validation_proof: [0; 32],
                 approved,
-                goal_completed,
+                session_completed: goal_completed,
             };
             self.process_approved_validation(&message)?;
         } else {
@@ -151,8 +152,8 @@ impl<'info> SubmitTaskValidation<'info> {
             ErrorCode::InvalidNodeStatus
         );
         require!(
-            self.goal.status == GoalStatus::Active,
-            ErrorCode::InvalidGoalStatus
+            self.session.status == SessionStatus::Active,
+            ErrorCode::InvalidSessionStatus
         );
         require!(
             self.task.status == TaskStatus::AwaitingValidation,
@@ -183,7 +184,7 @@ impl<'info> SubmitTaskValidation<'info> {
             verify_tee_signature(&self.instruction_sysvar, &validator_tee_signing_pubkey)?;
 
         require!(
-            message.goal_id == self.goal.goal_slot_id,
+            message.goal_id == self.session.session_slot_id,
             ErrorCode::InvalidValidatorMessage
         );
         require!(
@@ -195,16 +196,15 @@ impl<'info> SubmitTaskValidation<'info> {
         // Verify validation_proof matches expected proof
         self.verify_validation_proof(&message)?;
 
-        // Check if validator already validated (in either list)
+        let validator_pubkey = self.node_validating.key();
+        let validator_entry = self
+            .task
+            .validations
+            .iter()
+            .find(|v| v.pubkey == validator_pubkey)
+            .ok_or(ErrorCode::ValidatorNotAssigned)?;
         require!(
-            !self
-                .task
-                .approved_validators
-                .contains(&self.node_validating.key())
-                && !self
-                    .task
-                    .rejected_validators
-                    .contains(&self.node_validating.key()),
+            validator_entry.status == ValidationStatus::Pending,
             ErrorCode::DuplicateValidation
         );
 
@@ -238,10 +238,21 @@ impl<'info> SubmitTaskValidation<'info> {
     }
 
     fn process_approved_validation(&mut self, message: &SubmitTaskValidationMessage) -> Result<()> {
-        self.task
-            .approved_validators
-            .push(self.node_validating.key());
-        let approved_count = self.task.approved_validators.len() as u32;
+        let validator_pubkey = self.node_validating.key();
+        if let Some(v) = self
+            .task
+            .validations
+            .iter_mut()
+            .find(|v| v.pubkey == validator_pubkey)
+        {
+            v.status = ValidationStatus::Approved;
+        }
+        let approved_count = self
+            .task
+            .validations
+            .iter()
+            .filter(|v| v.status == ValidationStatus::Approved)
+            .count() as u32;
         let threshold_reached =
             check_validation_threshold(approved_count, self.network_config.required_validations)?;
 
@@ -267,24 +278,16 @@ impl<'info> SubmitTaskValidation<'info> {
         hasher.update(&self.task.chain_proof);
         hasher.update(old_input_cid);
         hasher.update(old_output_cid);
-        hasher.update(&self.task.execution_count.to_le_bytes());
+        hasher.update(&self.task.task_index.to_le_bytes());
         self.task.chain_proof = hasher.finalize().into();
 
         // Move pending to validated (these become the historical record)
         self.task.input_cid = self.task.pending_input_cid.take();
         self.task.output_cid = self.task.pending_output_cid.take();
 
-        // Update goal chain_proof
-        let mut hasher = Sha256::new();
-        hasher.update(&self.goal.chain_proof);
-        hasher.update(&self.task.chain_proof);
-        hasher.update(&self.task.task_slot_id.to_le_bytes());
-        hasher.update(&self.goal.current_iteration.to_le_bytes());
-        self.goal.chain_proof = hasher.finalize().into();
-
         // Release locked funds
-        self.goal.locked_for_tasks = self
-            .goal
+        self.session.locked_for_tasks = self
+            .session
             .locked_for_tasks
             .checked_sub(self.task.max_task_cost)
             .ok_or(ErrorCode::Underflow)?;
@@ -295,8 +298,8 @@ impl<'info> SubmitTaskValidation<'info> {
             ErrorCode::InsufficientBalance
         );
 
-        let goal_key = self.goal.key();
-        let vault_seeds = &[b"goal_vault", goal_key.as_ref(), &[self.goal.vault_bump]];
+        let session_key = self.session.key();
+        let vault_seeds = &[b"session_vault", session_key.as_ref(), &[self.session.vault_bump]];
         let vault_signer = &[&vault_seeds[..]];
 
         let cpi_accounts = system_program::Transfer {
@@ -322,59 +325,62 @@ impl<'info> SubmitTaskValidation<'info> {
             .checked_add(1)
             .ok_or(ErrorCode::Overflow)?;
 
-        self.goal.current_iteration = self
-            .goal
+        self.session.current_iteration = self
+            .session
             .current_iteration
             .checked_add(1)
             .ok_or(ErrorCode::Overflow)?;
 
-        if message.goal_completed {
-            self.goal.status = GoalStatus::Ready;
+        if message.session_completed
+            || (self.session.max_iterations != 0
+                && self.session.current_iteration >= self.session.max_iterations)
+        {
+            self.session.status = SessionStatus::Completed;
             self.task.status = TaskStatus::Ready;
-            
-            // Emit goal completed event
-            emit!(GoalCompleted {
-                goal_slot_id: self.goal.goal_slot_id,
-                final_iteration: self.goal.current_iteration,
+
+            emit!(SessionCompleted {
+                session_slot_id: self.session.session_slot_id,
+                final_iteration: self.session.current_iteration,
                 vault_balance: self.vault.lamports(),
             });
         } else {
             self.task.status = TaskStatus::Pending;
         }
 
-        // Reset validation tracking after successful processing
-        self.task.approved_validators = Vec::new();
-        self.task.rejected_validators = Vec::new();
-
-        // Emit node validated event
-        emit!(NodeValidated {
-            node: self.node_info.node_pubkey,
-            validator: self.node_validating.key(),
-            goal_slot_id: Some(self.goal.goal_slot_id),
-            task_slot_id: Some(self.task.task_slot_id),
-        });
+        self.task.validations.clear();
 
         // Emit task validation submitted event
         emit!(TaskValidationSubmitted {
-            goal_slot_id: self.goal.goal_slot_id,
+            session_slot_id: self.session.session_slot_id,
             task_slot_id: self.task.task_slot_id,
             validator: self.node_validating.key(),
             payment_amount: message.payment_amount,
             approved: message.approved,
-            goal_completed: message.goal_completed,
-            current_iteration: self.goal.current_iteration,
+            session_completed: message.session_completed,
+            current_iteration: self.session.current_iteration,
             vault_balance: self.vault.lamports(),
-            locked_for_tasks: self.goal.locked_for_tasks,
+            locked_for_tasks: self.session.locked_for_tasks,
         });
 
         Ok(())
     }
 
     fn process_rejected_validation(&mut self) -> Result<()> {
-        self.task
-            .rejected_validators
-            .push(self.node_validating.key());
-        let rejected_count = self.task.rejected_validators.len() as u32;
+        let validator_pubkey = self.node_validating.key();
+        if let Some(v) = self
+            .task
+            .validations
+            .iter_mut()
+            .find(|v| v.pubkey == validator_pubkey)
+        {
+            v.status = ValidationStatus::Rejected;
+        }
+        let rejected_count = self
+            .task
+            .validations
+            .iter()
+            .filter(|v| v.status == ValidationStatus::Rejected)
+            .count() as u32;
         let threshold_reached =
             check_validation_threshold(rejected_count, self.network_config.required_validations)?;
 
@@ -383,8 +389,8 @@ impl<'info> SubmitTaskValidation<'info> {
         }
 
         // Release task lock
-        self.goal.locked_for_tasks = self
-            .goal
+        self.session.locked_for_tasks = self
+            .session
             .locked_for_tasks
             .checked_sub(self.task.max_task_cost)
             .ok_or(ErrorCode::Underflow)?;
@@ -394,16 +400,7 @@ impl<'info> SubmitTaskValidation<'info> {
         self.task.pending_output_cid = None;
         self.task.status = TaskStatus::Ready;
 
-        self.task.approved_validators = Vec::new();
-        self.task.rejected_validators = Vec::new();
-
-        // Emit node rejected event
-        emit!(NodeRejected {
-            node: self.node_info.node_pubkey,
-            validator: self.node_validating.key(),
-            goal_slot_id: Some(self.goal.goal_slot_id),
-            task_slot_id: Some(self.task.task_slot_id),
-        });
+        self.task.validations.clear();
 
         Ok(())
     }

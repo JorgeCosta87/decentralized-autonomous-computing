@@ -20,14 +20,12 @@ pub mod dac {
     pub fn initialize_network<'info>(
         ctx: Context<'_, '_, '_, 'info, InitializeNetwork<'info>>,
         cid_config: String,
-        allocate_goals: u64,
         allocate_tasks: u64,
         approved_code_measurements: Vec<CodeMeasurement>,
         required_validations: u32,
     ) -> Result<()> {
         ctx.accounts.initialize_network(
             cid_config,
-            allocate_goals,
             allocate_tasks,
             approved_code_measurements,
             required_validations,
@@ -83,47 +81,68 @@ pub mod dac {
         ctx.accounts.validate_agent()
     }
 
-    pub fn create_goal(
-        ctx: Context<CreateGoal>,
+    pub fn create_session(
+        ctx: Context<CreateSession>,
         is_owned: bool,
         is_confidential: bool,
     ) -> Result<()> {
         ctx.accounts
-            .create_goal(is_owned, is_confidential, &ctx.bumps)
+            .create_session(is_owned, is_confidential, &ctx.bumps)
     }
 
-    pub fn set_goal(
-        ctx: Context<SetGoal>,
+    pub fn set_session(
+        ctx: Context<SetSession>,
         specification_cid: String,
         max_iterations: u64,
         initial_deposit: u64,
+        compute_node: Pubkey,
+        task_type: TaskType,
     ) -> Result<()> {
-        ctx.accounts.set_goal(
+        ctx.accounts.set_session(
             specification_cid,
             max_iterations,
             initial_deposit,
+            compute_node,
+            task_type,
             &ctx.bumps,
         )
     }
 
-    pub fn contribute_to_goal(ctx: Context<ContributeToGoal>, deposit_amount: u64) -> Result<()> {
-        ctx.accounts.contribute_to_goal(deposit_amount, &ctx.bumps)
+    pub fn contribute_to_session(ctx: Context<ContributeToSession>, deposit_amount: u64) -> Result<()> {
+        ctx.accounts.contribute_to_session(deposit_amount, &ctx.bumps)
     }
 
-    pub fn withdraw_from_goal(ctx: Context<WithdrawFromGoal>, shares_to_burn: u64) -> Result<()> {
-        ctx.accounts.withdraw_from_goal(shares_to_burn)
+    pub fn withdraw_from_session(
+        ctx: Context<WithdrawFromSession>,
+        shares_to_burn: u64,
+    ) -> Result<()> {
+        ctx.accounts.withdraw_from_session(shares_to_burn)
     }
 
-    pub fn claim_task(ctx: Context<ClaimTask>, max_task_cost: u64) -> Result<()> {
-        ctx.accounts.claim_task(max_task_cost)
+    pub fn claim_task(
+        ctx: Context<ClaimTask>,
+        max_task_cost: u64,
+        max_call_count: u64,
+    ) -> Result<()> {
+        ctx.accounts.claim_task(max_task_cost, max_call_count)
+    }
+
+    pub fn submit_task(
+        ctx: Context<SubmitTask>,
+        input_cid: String,
+    ) -> Result<()> {
+        ctx.accounts.submit_task(input_cid)
     }
 
     pub fn submit_task_result(
         ctx: Context<SubmitTaskResult>,
         input_cid: String,
         output_cid: String,
+        state_cid: Option<String>,
+        call_count: u64,
     ) -> Result<()> {
-        ctx.accounts.submit_task_result(input_cid, output_cid)
+        ctx.accounts
+            .submit_task_result(input_cid, output_cid, state_cid, call_count)
     }
 
     // Note: submit_confidential_task_validation handles TEE-based validation (requires Ed25519 instruction)

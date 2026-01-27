@@ -76,7 +76,8 @@ impl<'info> ValidatePublicNode<'info> {
             )?;
             if threshold_reached {
                 self.node_info.status = NodeStatus::Active;
-                self.network_config.increment_public_node_count()?;
+                self.network_config
+                    .add_public_node(self.node_info.node_pubkey)?;
             }
         } else {
             self.node_info

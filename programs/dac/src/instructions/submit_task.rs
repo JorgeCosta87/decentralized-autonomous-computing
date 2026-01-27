@@ -1,14 +1,14 @@
 use anchor_lang::prelude::*;
 
+use crate::SessionStatus;
 use crate::errors::ErrorCode;
-use crate::events::TaskResultSubmitted;
 use crate::state::{Task, TaskStatus};
 use crate::state::Session;
 
 #[derive(Accounts)]
-pub struct SubmitTaskResult<'info> {
+pub struct SubmitTask<'info> {
     #[account(mut)]
-    pub compute_node: Signer<'info>,
+    pub owner: Signer<'info>,
 
     #[account(
         mut,
@@ -18,6 +18,7 @@ pub struct SubmitTaskResult<'info> {
     pub task: Account<'info, Task>,
     #[account(
         mut,
+        has_one = owner,
         seeds = [b"session", network_config.key().as_ref(), session.session_slot_id.to_le_bytes().as_ref()],
         bump = session.bump,
     )]
@@ -30,40 +31,20 @@ pub struct SubmitTaskResult<'info> {
     pub network_config: Account<'info, crate::NetworkConfig>,
 }
 
-impl<'info> SubmitTaskResult<'info> {
-    pub fn submit_task_result(
+impl<'info> SubmitTask<'info> {
+    pub fn submit_task(
         &mut self,
         input_cid: String,
-        output_cid: String,
-        state_cid: Option<String>,
-        call_count: u64,
     ) -> Result<()> {
         require!(
-            self.task.status == TaskStatus::Processing,
+            self.task.status == TaskStatus::Ready,
             ErrorCode::InvalidTaskStatus
         );
-        require!(
-            self.task.compute_node == Some(self.compute_node.key()),
-            ErrorCode::InvalidComputeNodePubkey
-        );
+        require!(self.session.status == SessionStatus::Active, ErrorCode::InvalidSessionStatus);
         require!(self.task.session_slot_id == Some(self.session.session_slot_id), ErrorCode::InvalidSession);
 
-        // Store current execution results as pending (awaiting validation)
         self.task.pending_input_cid = Some(input_cid.clone());
-        self.task.pending_output_cid = Some(output_cid.clone());
-        self.task.call_count = call_count;
-        self.task.status = TaskStatus::AwaitingValidation;
-
-        if let Some(state_cid_str) = state_cid {
-            self.session.state_cid = Some(state_cid_str);
-        }
-
-        emit!(TaskResultSubmitted {
-            session_slot_id: self.session.session_slot_id,
-            task_slot_id: self.task.task_slot_id,
-            input_cid,
-            output_cid,
-        });
+        self.task.status = TaskStatus::Pending;
 
         Ok(())
     }

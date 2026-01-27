@@ -51,10 +51,12 @@ impl<'info> ActivateNode<'info> {
 
         match self.node_info.node_type {
             NodeType::Public => {
-                self.network_config.increment_public_node_count()?;
+                self.network_config
+                    .add_public_node(self.node_info.node_pubkey)?;
             }
             NodeType::Confidential => {
-                self.network_config.increment_confidential_node_count()?;
+                self.network_config
+                    .add_confidential_node(self.node_info.node_pubkey)?;
             }
         }
 

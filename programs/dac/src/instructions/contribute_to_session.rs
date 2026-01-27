@@ -3,25 +3,25 @@ use anchor_lang::system_program;
 
 use crate::errors::ErrorCode;
 use crate::events::ContributionMade;
-use crate::state::{Contribution, Goal, GoalStatus};
+use crate::state::{Contribution, Session, SessionStatus};
 use crate::NetworkConfig;
 
 #[derive(Accounts)]
-pub struct ContributeToGoal<'info> {
+pub struct ContributeToSession<'info> {
     #[account(mut)]
     pub contributor: Signer<'info>,
 
     #[account(
         mut,
-        seeds = [b"goal", network_config.key().as_ref(), goal.goal_slot_id.to_le_bytes().as_ref()],
-        bump = goal.bump,
+        seeds = [b"session", network_config.key().as_ref(), session.session_slot_id.to_le_bytes().as_ref()],
+        bump = session.bump,
     )]
-    pub goal: Account<'info, Goal>,
+    pub session: Account<'info, Session>,
 
     #[account(
         mut,
-        seeds = [b"goal_vault", goal.key().as_ref()],
-        bump = goal.vault_bump,
+        seeds = [b"session_vault", session.key().as_ref()],
+        bump = session.vault_bump,
     )]
     pub vault: SystemAccount<'info>,
 
@@ -29,7 +29,7 @@ pub struct ContributeToGoal<'info> {
         init_if_needed,
         payer = contributor,
         space = 8 + Contribution::INIT_SPACE,
-        seeds = [b"contribution", goal.key().as_ref(), contributor.key().as_ref()],
+        seeds = [b"contribution", session.key().as_ref(), contributor.key().as_ref()],
         bump,
     )]
     pub contribution: Account<'info, Contribution>,
@@ -43,34 +43,31 @@ pub struct ContributeToGoal<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> ContributeToGoal<'info> {
-    pub fn contribute_to_goal(
+impl<'info> ContributeToSession<'info> {
+    pub fn contribute_to_session(
         &mut self,
         deposit_amount: u64,
-        bumps: &ContributeToGoalBumps,
+        bumps: &ContributeToSessionBumps,
     ) -> Result<()> {
         require!(
-            self.goal.status == GoalStatus::Active,
-            ErrorCode::InvalidGoalStatus
+            self.session.status == SessionStatus::Active,
+            ErrorCode::InvalidSessionStatus
         );
         require!(deposit_amount > 0, ErrorCode::Overflow);
 
-        // Handle case where total_shares == 0 (goal was set but all funds withdrawn)
-        // In this case, treat it like first deposit (share_price = 1.0)
-        let share_price = if self.goal.total_shares == 0 {
+        let share_price = if self.session.total_shares == 0 {
             1.0_f64
         } else {
-            // Exclude rent lamports from share price calculation
             let rent = Rent::get()?;
             let rent_exempt_minimum = rent.minimum_balance(0);
             let available_balance = self
                 .vault
                 .lamports()
-                .checked_sub(self.goal.locked_for_tasks)
+                .checked_sub(self.session.locked_for_tasks)
                 .ok_or(ErrorCode::Underflow)?
                 .checked_sub(rent_exempt_minimum)
                 .ok_or(ErrorCode::Underflow)?;
-            (available_balance as f64) / (self.goal.total_shares as f64)
+            (available_balance as f64) / (self.session.total_shares as f64)
         };
 
         let shares_to_mint = (deposit_amount as f64 / share_price) as u64;
@@ -83,19 +80,19 @@ impl<'info> ContributeToGoal<'info> {
         let cpi_context = CpiContext::new(self.system_program.to_account_info(), cpi_accounts);
         system_program::transfer(cpi_context, deposit_amount)?;
 
-        let goal_key = self.goal.key();
+        let session_key = self.session.key();
         let contributor_key = self.contributor.key();
 
-        if self.contribution.goal == Pubkey::default() {
-            self.contribution.goal = goal_key;
+        if self.contribution.session == Pubkey::default() {
+            self.contribution.session = session_key;
             self.contribution.contributor = contributor_key;
             self.contribution.shares = shares_to_mint;
             self.contribution.refund_amount = 0;
             self.contribution.bump = bumps.contribution;
         } else {
             require_keys_eq!(
-                self.contribution.goal,
-                goal_key,
+                self.contribution.session,
+                session_key,
                 ErrorCode::InvalidPDAAccount
             );
             require_keys_eq!(
@@ -104,7 +101,6 @@ impl<'info> ContributeToGoal<'info> {
                 ErrorCode::InvalidPDAAccount
             );
 
-            // Add additional shares
             self.contribution.shares = self
                 .contribution
                 .shares
@@ -112,19 +108,18 @@ impl<'info> ContributeToGoal<'info> {
                 .ok_or(ErrorCode::Overflow)?;
         }
 
-        // Update goal total shares
-        self.goal.total_shares = self
-            .goal
+        self.session.total_shares = self
+            .session
             .total_shares
             .checked_add(shares_to_mint)
             .ok_or(ErrorCode::Overflow)?;
 
         emit!(ContributionMade {
-            goal_slot_id: self.goal.goal_slot_id,
+            session_slot_id: self.session.session_slot_id,
             contributor: self.contributor.key(),
             deposit_amount,
             shares_minted: shares_to_mint,
-            total_shares: self.goal.total_shares,
+            total_shares: self.session.total_shares,
         });
 
         Ok(())

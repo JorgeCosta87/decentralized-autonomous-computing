@@ -1,12 +1,12 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::ErrorCode;
-use crate::state::{CodeMeasurement, Goal, GoalStatus, NetworkConfig, Task, TaskStatus};
+use crate::state::{CodeMeasurement, NetworkConfig, Task, TaskStatus};
 use crate::utils::init_dynamic_pda;
-use crate::ActionType;
+use crate::TaskType;
 
 #[derive(Accounts)]
-#[instruction(allocate_goals: u64, allocate_tasks: u64)]
+#[instruction(allocate_tasks: u64)]
 pub struct InitializeNetwork<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -27,7 +27,6 @@ impl<'info> InitializeNetwork<'info> {
     pub fn initialize_network(
         &mut self,
         cid_config: String,
-        allocate_goals: u64,
         allocate_tasks: u64,
         approved_code_measurements: Vec<CodeMeasurement>,
         required_validations: u32,
@@ -50,29 +49,19 @@ impl<'info> InitializeNetwork<'info> {
             authority: self.authority.key(),
             cid_config: cid_config,
             genesis_hash: genesis_hash,
-            agent_count: 0,
-            goal_count: allocate_goals,
             task_count: allocate_tasks,
-            confidential_node_count: 0,
-            public_node_count: 0,
-            approved_code_measurements: approved_code_measurements,
             required_validations: required_validations,
+            allowed_models: vec![],
+            approved_confidential_nodes: vec![],
+            approved_public_nodes: vec![],
+            agent_count: 0,
+            session_count: 0,
+            approved_code_measurements: approved_code_measurements,
             bump: bumps.network_config,
         });
 
-        let mut account_offset = 0;
-
-        account_offset += Self::pre_allocate_goals(
-            &remaining_accounts[account_offset..],
-            &self.authority,
-            self.network_config.key(),
-            genesis_hash,
-            allocate_goals,
-            &self.system_program,
-        )?;
-
         Self::pre_allocate_tasks(
-            &remaining_accounts[account_offset..],
+            &remaining_accounts,
             &self.authority,
             self.network_config.key(),
             genesis_hash,
@@ -81,59 +70,6 @@ impl<'info> InitializeNetwork<'info> {
         )?;
 
         Ok(())
-    }
-
-    fn pre_allocate_goals(
-        remaining_accounts: &[AccountInfo<'info>],
-        authority: &Signer<'info>,
-        network_config_key: Pubkey,
-        genesis_hash: [u8; 32],
-        allocate_goals: u64,
-        system_program: &Program<'info, System>,
-    ) -> Result<usize> {
-        let mut account_index = 0;
-
-        for goal_id in 0..allocate_goals {
-            let goal_account_info = remaining_accounts
-                .get(account_index)
-                .ok_or(ErrorCode::MissingAccount)?;
-            account_index += 1;
-
-            let seeds = &[b"goal", network_config_key.as_ref(), &goal_id.to_le_bytes()];
-
-            let bump = init_dynamic_pda(
-                authority,
-                goal_account_info,
-                seeds,
-                8 + Goal::INIT_SPACE,
-                &crate::ID,
-                system_program,
-            )?;
-
-            let goal_data = Goal {
-                goal_slot_id: goal_id,
-                owner: Pubkey::default(),
-                agent: Pubkey::default(),
-                task: Pubkey::default(),
-                status: GoalStatus::Ready,
-                is_confidential: false,
-                max_iterations: 0,
-                current_iteration: 0,
-                task_index_at_goal_start: 0,
-                task_index_at_goal_end: 0,
-                total_shares: 0,
-                locked_for_tasks: 0,
-                chain_proof: genesis_hash,
-                specification_cid: "".to_string(),
-                state_cid: None,
-                vault_bump: 0,
-                bump,
-            };
-
-            goal_data.try_serialize(&mut *goal_account_info.try_borrow_mut_data()?)?;
-        }
-
-        Ok(account_index)
     }
 
     fn pre_allocate_tasks(
@@ -162,11 +98,12 @@ impl<'info> InitializeNetwork<'info> {
 
             let task_data = Task {
                 task_slot_id: task_id,
+                session_slot_id: None,
                 status: TaskStatus::Ready,
                 compute_node: None,
-                action_type: ActionType::Llm,
+                task_type: TaskType::Completion(0),
                 chain_proof: genesis_hash,
-                execution_count: 0,
+                task_index: 0,
                 max_task_cost: 0,
                 max_call_count: 0,
                 call_count: 0,
@@ -174,8 +111,7 @@ impl<'info> InitializeNetwork<'info> {
                 output_cid: None,
                 pending_input_cid: None,
                 pending_output_cid: None,
-                approved_validators: Vec::new(),
-                rejected_validators: Vec::new(),
+                validations: Vec::new(),
                 bump,
             };
 

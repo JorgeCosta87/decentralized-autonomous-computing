@@ -2,26 +2,26 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
 use crate::errors::ErrorCode;
-use crate::events::GoalSet;
-use crate::state::{Agent, AgentStatus, Contribution, Goal, GoalStatus, Task, TaskStatus};
-use crate::ActionType;
+use crate::events::SessionSet;
+use crate::state::{Agent, AgentStatus, Contribution, Session, SessionStatus, Task, TaskStatus};
 use crate::NetworkConfig;
+use crate::TaskType;
 
 #[derive(Accounts)]
-pub struct SetGoal<'info> {
+pub struct SetSession<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
 
     #[account(
         mut,
-        seeds = [b"goal", network_config.key().as_ref(), goal.goal_slot_id.to_le_bytes().as_ref()],
-        bump = goal.bump,
+        seeds = [b"session", network_config.key().as_ref(), session.session_slot_id.to_le_bytes().as_ref()],
+        bump = session.bump,
     )]
-    pub goal: Account<'info, Goal>,
+    pub session: Account<'info, Session>,
 
     #[account(
         mut,
-        seeds = [b"goal_vault", goal.key().as_ref()],
+        seeds = [b"session_vault", session.key().as_ref()],
         bump,
     )]
     pub vault: SystemAccount<'info>,
@@ -30,7 +30,7 @@ pub struct SetGoal<'info> {
         init,
         payer = owner,
         space = 8 + Contribution::INIT_SPACE,
-        seeds = [b"contribution", goal.key().as_ref(), owner.key().as_ref()],
+        seeds = [b"contribution", session.key().as_ref(), owner.key().as_ref()],
         bump,
     )]
     pub owner_contribution: Account<'info, Contribution>,
@@ -57,21 +57,23 @@ pub struct SetGoal<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> SetGoal<'info> {
-    pub fn set_goal(
+impl<'info> SetSession<'info> {
+    pub fn set_session(
         &mut self,
         specification_cid: String,
         max_iterations: u64,
         initial_deposit: u64,
-        bumps: &SetGoalBumps,
+        compute_node: Pubkey,
+        task_type: TaskType,
+        bumps: &SetSessionBumps,
     ) -> Result<()> {
         require!(
-            self.goal.status == GoalStatus::Ready,
-            ErrorCode::InvalidGoalStatus
+            self.session.status == SessionStatus::Pending,
+            ErrorCode::InvalidSessionStatus
         );
         require!(
-            self.goal.owner == Pubkey::default() || self.goal.owner == self.owner.key(),
-            ErrorCode::InvalidGoalOwner
+            self.session.owner == Pubkey::default() || self.session.owner == self.owner.key(),
+            ErrorCode::InvalidSessionOwner
         );
         require!(
             self.task.status == TaskStatus::Ready,
@@ -83,6 +85,16 @@ impl<'info> SetGoal<'info> {
         );
         require!(initial_deposit > 0, ErrorCode::DepositTooSmall);
 
+        let approved = if self.session.is_confidential {
+            &self.network_config.approved_confidential_nodes
+        } else {
+            &self.network_config.approved_public_nodes
+        };
+        require!(
+            approved.contains(&compute_node),
+            ErrorCode::InvalidComputeNodePubkey
+        );
+
         // Check if vault only has rent lamports (no leftover SOL from previous goal)
         let rent = Rent::get()?;
         let rent_exempt_minimum = rent.minimum_balance(0);
@@ -92,17 +104,16 @@ impl<'info> SetGoal<'info> {
             ErrorCode::VaultHasLeftoverFunds
         );
 
-        // If reusing goal (current_iteration > 0), reset execution and payment state
-        if self.goal.current_iteration > 0 {
-            self.goal.current_iteration = 0;
-            self.goal.task_index_at_goal_start = self.goal.task_index_at_goal_end;
-            self.goal.task_index_at_goal_end = 0;
-            self.goal.total_shares = 0;
-            self.goal.locked_for_tasks = 0;
+        if self.session.current_iteration > 0 {
+            self.session.current_iteration = 0;
+            self.session.task_index_start = self.session.task_index_end;
+            self.session.task_index_end = 0;
+            self.session.total_shares = 0;
+            self.session.locked_for_tasks = 0;
         }
 
-        let goal_key = self.goal.key();
-        let vault_seeds = &[b"goal_vault", goal_key.as_ref(), &[bumps.vault]];
+        let session_key = self.session.key();
+        let vault_seeds = &[b"session_vault", session_key.as_ref(), &[bumps.vault]];
         let vault_signer = &[&vault_seeds[..]];
 
         if vault_balance == 0 {
@@ -140,33 +151,32 @@ impl<'info> SetGoal<'info> {
         require!(shares > 0, ErrorCode::Overflow);
 
         self.owner_contribution.set_inner(Contribution {
-            goal: self.goal.key(),
+            session: self.session.key(),
             contributor: self.owner.key(),
             shares,
             refund_amount: 0,
             bump: bumps.owner_contribution,
         });
 
-        self.goal.owner = self.owner.key();
-        self.goal.agent = self.agent.key();
-        self.goal.task = self.task.key();
-        self.goal.specification_cid = specification_cid;
-        self.goal.max_iterations = max_iterations;
-        self.goal.total_shares = shares;
-        self.goal.status = GoalStatus::Active;
-        self.goal.vault_bump = bumps.vault;
-        self.goal.task_index_at_goal_start = self.task.execution_count;
+        self.session.owner = self.owner.key();
+        self.session.task = self.task.key();
+        self.session.specification_cid = specification_cid;
+        self.session.max_iterations = max_iterations;
+        self.session.total_shares = shares;
+        self.session.status = SessionStatus::Active;
+        self.session.vault_bump = bumps.vault;
+        self.session.task_index_start = self.task.task_index;
 
-        self.task.status = TaskStatus::Pending; // Task is pending for execution
-        self.task.action_type = ActionType::Llm;
+        self.task.compute_node = Some(compute_node);
+        self.task.status = TaskStatus::Ready;
+        self.task.task_type = task_type;
 
-        emit!(GoalSet {
-            goal_slot_id: self.goal.goal_slot_id,
+        emit!(SessionSet {
+            session_slot_id: self.session.session_slot_id,
             owner: self.owner.key(),
-            agent_slot_id: self.agent.agent_slot_id,
             task_slot_id: self.task.task_slot_id,
-            specification_cid: self.goal.specification_cid.clone(),
-            max_iterations: self.goal.max_iterations,
+            specification_cid: self.session.specification_cid.clone(),
+            max_iterations: self.session.max_iterations,
             initial_deposit,
         });
 

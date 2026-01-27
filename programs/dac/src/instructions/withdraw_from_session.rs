@@ -2,31 +2,31 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
 use crate::errors::ErrorCode;
-use crate::state::{Contribution, Goal, GoalStatus};
+use crate::state::{Contribution, Session, SessionStatus};
 use crate::NetworkConfig;
 
 #[derive(Accounts)]
-pub struct WithdrawFromGoal<'info> {
+pub struct WithdrawFromSession<'info> {
     #[account(mut)]
     pub contributor: Signer<'info>,
 
     #[account(
         mut,
-        seeds = [b"goal", network_config.key().as_ref(), goal.goal_slot_id.to_le_bytes().as_ref()],
-        bump = goal.bump,
+        seeds = [b"session", network_config.key().as_ref(), session.session_slot_id.to_le_bytes().as_ref()],
+        bump = session.bump,
     )]
-    pub goal: Account<'info, Goal>,
+    pub session: Account<'info, Session>,
 
     #[account(
         mut,
-        seeds = [b"goal_vault", goal.key().as_ref()],
-        bump = goal.vault_bump,
+        seeds = [b"session_vault", session.key().as_ref()],
+        bump = session.vault_bump,
     )]
     pub vault: SystemAccount<'info>,
 
     #[account(
         mut,
-        seeds = [b"contribution", goal.key().as_ref(), contributor.key().as_ref()],
+        seeds = [b"contribution", session.key().as_ref(), contributor.key().as_ref()],
         bump = contribution.bump,
     )]
     pub contribution: Account<'info, Contribution>,
@@ -40,11 +40,11 @@ pub struct WithdrawFromGoal<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> WithdrawFromGoal<'info> {
-    pub fn withdraw_from_goal(&mut self, shares_to_burn: u64) -> Result<()> {
+impl<'info> WithdrawFromSession<'info> {
+    pub fn withdraw_from_session(&mut self, shares_to_burn: u64) -> Result<()> {
         require!(
-            self.goal.status == GoalStatus::Active,
-            ErrorCode::InvalidGoalStatus
+            self.session.status == SessionStatus::Active,
+            ErrorCode::InvalidSessionStatus
         );
         require!(shares_to_burn > 0, ErrorCode::Overflow);
         require!(
@@ -58,11 +58,11 @@ impl<'info> WithdrawFromGoal<'info> {
         let available_balance = self
             .vault
             .lamports()
-            .checked_sub(self.goal.locked_for_tasks)
+            .checked_sub(self.session.locked_for_tasks)
             .ok_or(ErrorCode::Underflow)?
             .checked_sub(rent_exempt_minimum)
             .ok_or(ErrorCode::Underflow)?;
-        let share_price = (available_balance as f64) / (self.goal.total_shares as f64);
+        let share_price = (available_balance as f64) / (self.session.total_shares as f64);
 
         let withdraw_amount = (shares_to_burn as f64 * share_price) as u64;
         // available_balance already excludes rent and locked_for_tasks
@@ -71,8 +71,8 @@ impl<'info> WithdrawFromGoal<'info> {
             ErrorCode::InsufficientBalance
         );
 
-        let goal_key = self.goal.key();
-        let vault_seeds = &[b"goal_vault", goal_key.as_ref(), &[self.goal.vault_bump]];
+        let session_key = self.session.key();
+        let vault_seeds = &[b"session_vault", session_key.as_ref(), &[self.session.vault_bump]];
         let vault_signer = &[&vault_seeds[..]];
 
         let cpi_accounts = system_program::Transfer {
@@ -94,8 +94,8 @@ impl<'info> WithdrawFromGoal<'info> {
             .ok_or(ErrorCode::Underflow)?;
 
         // Update goal total shares
-        self.goal.total_shares = self
-            .goal
+        self.session.total_shares = self
+            .session
             .total_shares
             .checked_sub(shares_to_burn)
             .ok_or(ErrorCode::Underflow)?;
