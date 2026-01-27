@@ -1,59 +1,57 @@
 import type { Address, RpcSubscriptions } from '@solana/kit';
 import { address, isSome, unwrapOption } from '@solana/kit';
 import type { DacServiceDeps } from './dacService.js';
-import { deriveGoalAddress, DAC_PROGRAM_ID } from './dacPdas.js';
+import { deriveSessionAddress, DAC_PROGRAM_ID } from './dacPdas.js';
 import {
   getTaskClaimedDecoder,
   getTaskResultSubmittedDecoder,
   getTaskValidationSubmittedDecoder,
-  getGoalSetDecoder,
+  getSessionSetDecoder,
   getContributionMadeDecoder,
-  getGoalCompletedDecoder,
+  getSessionCompletedDecoder,
   getAgentCreatedDecoder,
   getNodeValidatedDecoder,
   getNodeRejectedDecoder,
 } from '../generated/dac/types/index.js';
 
-export interface GoalEvent {
-  type: 'TaskClaimed' | 'TaskResultSubmitted' | 'TaskValidationSubmitted' | 'GoalSet' | 'ContributionMade' | 'GoalCompleted' | 'NodeValidated' | 'NodeRejected' | 'AgentCreated';
-  goalSlotId?: bigint;
+export interface SessionEvent {
+  type: 'TaskClaimed' | 'TaskResultSubmitted' | 'TaskValidationSubmitted' | 'SessionSet' | 'ContributionMade' | 'SessionCompleted' | 'NodeValidated' | 'NodeRejected' | 'AgentCreated';
+  sessionSlotId?: bigint;
   taskSlotId?: bigint;
   timestamp: Date;
   signature?: string;
-  data: TaskClaimedEvent | TaskResultSubmittedEvent | TaskValidationSubmittedEvent | GoalSetEvent | ContributionMadeEvent | GoalCompletedEvent | NodeValidatedEvent | NodeRejectedEvent | AgentCreatedEvent;
+  data: TaskClaimedEvent | TaskResultSubmittedEvent | TaskValidationSubmittedEvent | SessionSetEvent | ContributionMadeEvent | SessionCompletedEvent | NodeValidatedEvent | NodeRejectedEvent | AgentCreatedEvent;
 }
 
 export interface TaskClaimedEvent {
-  goalSlotId: bigint;
+  sessionSlotId: bigint;
   taskSlotId: bigint;
   computeNode: Address;
   maxTaskCost: bigint;
 }
 
 export interface TaskResultSubmittedEvent {
-  goalSlotId: bigint;
+  sessionSlotId: bigint;
   taskSlotId: bigint;
   inputCid: string;
   outputCid: string;
-  nextInputCid: string;
 }
 
 export interface TaskValidationSubmittedEvent {
-  goalSlotId: bigint;
+  sessionSlotId: bigint;
   taskSlotId: bigint;
   validator: Address;
   paymentAmount: bigint;
   approved: boolean;
-  goalCompleted: boolean;
+  sessionCompleted: boolean;
   currentIteration: bigint;
   vaultBalance: bigint;
   lockedForTasks: bigint;
 }
 
-export interface GoalSetEvent {
-  goalSlotId: bigint;
+export interface SessionSetEvent {
+  sessionSlotId: bigint;
   owner: Address;
-  agentSlotId: bigint;
   taskSlotId: bigint;
   specificationCid: string;
   maxIterations: bigint;
@@ -61,15 +59,15 @@ export interface GoalSetEvent {
 }
 
 export interface ContributionMadeEvent {
-  goalSlotId: bigint;
+  sessionSlotId: bigint;
   contributor: Address;
   depositAmount: bigint;
   sharesMinted: bigint;
   totalShares: bigint;
 }
 
-export interface GoalCompletedEvent {
-  goalSlotId: bigint;
+export interface SessionCompletedEvent {
+  sessionSlotId: bigint;
   finalIteration: bigint;
   vaultBalance: bigint;
 }
@@ -77,14 +75,14 @@ export interface GoalCompletedEvent {
 export interface NodeValidatedEvent {
   node: Address;
   validator: Address;
-  goalSlotId?: bigint;
+  sessionSlotId?: bigint;
   taskSlotId?: bigint;
 }
 
 export interface NodeRejectedEvent {
   node: Address;
   validator: Address;
-  goalSlotId?: bigint;
+  sessionSlotId?: bigint;
   taskSlotId?: bigint;
 }
 
@@ -110,34 +108,34 @@ export interface FetchHistoricalEventsOptions {
  * Subscription service interface
  */
 export interface ISubscriptionService {
-  subscribeToGoalEvents(
+  subscribeToSessionEvents(
     networkConfig: Address,
-    goalSlotId: bigint,
-    callback: (event: GoalEvent) => void
+    sessionSlotId: bigint,
+    callback: (event: SessionEvent) => void
   ): Promise<() => void>;
-  
+
   /**
-   * Subscribe to network-wide events (all events, not filtered by goal)
+   * Subscribe to network-wide events (SessionSet, ContributionMade, SessionCompleted, AgentCreated)
    */
   subscribeToNetworkEvents(
-    callback: (event: GoalEvent) => void
+    callback: (event: SessionEvent) => void
   ): Promise<() => void>;
   
   /**
-   * Fetch historical events for a goal (and optionally a specific task)
+   * Fetch historical events for a session (and optionally a specific task)
    */
   fetchHistoricalEvents(
     networkConfig: Address,
-    goalSlotId: bigint,
+    sessionSlotId: bigint,
     options?: FetchHistoricalEventsOptions
-  ): Promise<GoalEvent[]>;
+  ): Promise<SessionEvent[]>;
   
   /**
    * Fetch network-wide historical events
    */
   fetchNetworkHistoricalEvents(
     options?: FetchHistoricalEventsOptions
-  ): Promise<GoalEvent[]>;
+  ): Promise<SessionEvent[]>;
 }
 
 /**
@@ -149,10 +147,10 @@ export function createSubscriptionService(
   const { rpcSubscriptions, programAddress } = deps;
 
   return {
-    async subscribeToGoalEvents(
+    async subscribeToSessionEvents(
       networkConfig: Address,
-      goalSlotId: bigint,
-      callback: (event: GoalEvent) => void
+      sessionSlotId: bigint,
+      callback: (event: SessionEvent) => void
     ): Promise<() => void> {
       if (!rpcSubscriptions) {
         throw new Error('RPC Subscriptions not available');
@@ -161,10 +159,6 @@ export function createSubscriptionService(
       const abortController = new AbortController();
 
       try {
-        // IMPORTANT: mentions only supports ONE pubkey per subscription.
-        // For goal-specific realtime, we subscribe to the PROGRAM (not goal address),
-        // then filter by decoded.goalSlotId in parseEventsFromLogs (which already does this).
-        // This scales better than one subscription per goal.
         const rpcSubs = rpcSubscriptions as any;
         const logsIterable = await rpcSubs
           .logsNotifications({ mentions: [programAddress] })
@@ -175,33 +169,22 @@ export function createSubscriptionService(
             for await (const notification of logsIterable) {
               if (abortController.signal.aborted) break;
 
-              // Extract notification data (handle different notification shapes)
               const value = notification?.value ?? notification?.params?.result?.value ?? notification?.result?.value;
               const signature: string | undefined = value?.signature;
               const logs: string[] | undefined = value?.logs;
               const err = value?.err;
 
               if (!signature || !logs) continue;
-              if (err) continue; // Skip failed transactions
+              if (err) continue;
 
-              // Goal filter is applied inside parseEventsFromLogs via goalSlotId check
-              // parseEventsFromLogs will only return events matching the goalSlotId
-              const events = parseEventsFromLogs(logs, goalSlotId, signature);
-              
-              // Filter to only include task events (exclude NodeValidated, NodeRejected, etc.)
+              const events = parseEventsFromLogs(logs, sessionSlotId, signature);
               for (const event of events) {
-                if (
-                  event.type === 'TaskClaimed' ||
-                  event.type === 'TaskResultSubmitted' ||
-                  event.type === 'TaskValidationSubmitted'
-                ) {
-                  callback(event);
-                }
+                callback(event);
               }
             }
           } catch (e) {
             if (!abortController.signal.aborted) {
-              console.error('[subscribeToGoalEvents] logsNotifications error:', e);
+              console.error('[subscribeToSessionEvents] logsNotifications error:', e);
             }
           }
         })();
@@ -210,41 +193,37 @@ export function createSubscriptionService(
           abortController.abort();
         };
       } catch (error) {
-        throw new Error(`Failed to subscribe to goal events: ${error}`);
+        throw new Error(`Failed to subscribe to session events: ${error}`);
       }
     },
-    
+
     async fetchHistoricalEvents(
       networkConfig: Address,
-      goalSlotId: bigint,
+      sessionSlotId: bigint,
       options: FetchHistoricalEventsOptions = {}
-    ): Promise<GoalEvent[]> {
-      const { taskSlotId, limit = 1000, before } = options; // Increased default limit for tracking all iterations
-      const goalAddress = await deriveGoalAddress(programAddress, networkConfig, goalSlotId);
-      const events: GoalEvent[] = [];
+    ): Promise<SessionEvent[]> {
+      const { taskSlotId, limit = 1000, before } = options;
+      const sessionAddress = await deriveSessionAddress(programAddress, networkConfig, sessionSlotId);
+      const events: SessionEvent[] = [];
 
       try {
         
-        // Fetch transaction signatures for the goal account
-        // Programs don't have signatures directly - transactions are signed by users
-        // So we need to get transactions that involve the goal account
+        // Fetch transaction signatures for the session account
         const signatureOptions: any = {
-          limit: Math.min(limit * 2, 500), // Increased cap to fetch more signatures for many iterations
+          limit: Math.min(limit * 2, 500),
         };
         if (before) {
           signatureOptions.before = before;
         }
 
-        // Get signatures for the goal account (this should work on local validators)
         let signatures: any[] = [];
         try {
-          signatures = await (deps.rpc as any).getSignaturesForAddress(goalAddress, signatureOptions).send();
+          signatures = await (deps.rpc as any).getSignaturesForAddress(sessionAddress, signatureOptions).send();
         } catch (error) {
-          console.error('[fetchHistoricalEvents] Failed to get goal account transactions:', error);
-          // Also try the goal vault address as a fallback
+          console.error('[fetchHistoricalEvents] Failed to get session account transactions:', error);
           try {
-            const { deriveGoalVaultAddress } = await import('./dacPdas.js');
-            const vaultAddress = await deriveGoalVaultAddress(programAddress, goalAddress);
+            const { deriveSessionVaultAddress } = await import('./dacPdas.js');
+            const vaultAddress = await deriveSessionVaultAddress(programAddress, sessionAddress);
             signatures = await (deps.rpc as any).getSignaturesForAddress(vaultAddress, signatureOptions).send();
           } catch (vaultError) {
             console.error('[fetchHistoricalEvents] Failed to get vault transactions:', vaultError);
@@ -290,7 +269,7 @@ export function createSubscriptionService(
 
             const parsedEvents = parseEventsFromLogs(
               tx.meta.logMessages,
-              goalSlotId,
+              sessionSlotId,
               signature,
               blockTime
             );
@@ -343,7 +322,7 @@ export function createSubscriptionService(
     },
     
     async subscribeToNetworkEvents(
-      callback: (event: GoalEvent) => void
+      callback: (event: SessionEvent) => void
     ): Promise<() => void> {
       if (!rpcSubscriptions) {
         throw new Error('RPC Subscriptions not available');
@@ -376,12 +355,11 @@ export function createSubscriptionService(
               // Parse events directly from logs (no getTransaction call needed)
               const parsedEvents = parseEventsFromLogs(logs, null, signature);
 
-              // Emit only network-wide event types
               for (const event of parsedEvents) {
                 if (
-                  event.type === 'GoalSet' ||
+                  event.type === 'SessionSet' ||
                   event.type === 'ContributionMade' ||
-                  event.type === 'GoalCompleted' ||
+                  event.type === 'SessionCompleted' ||
                   event.type === 'AgentCreated'
                 ) {
                   callback(event);
@@ -405,9 +383,9 @@ export function createSubscriptionService(
     
     async fetchNetworkHistoricalEvents(
       options: FetchHistoricalEventsOptions = {}
-    ): Promise<GoalEvent[]> {
+    ): Promise<SessionEvent[]> {
       const { limit = 100, before } = options;
-      const events: GoalEvent[] = [];
+      const events: SessionEvent[] = [];
 
       try {
         const signatureOptions: any = { limit: Math.min(limit * 2, 100) }; // Cap at 100 signatures max
@@ -454,10 +432,9 @@ export function createSubscriptionService(
               blockTime
             );
 
-            // Only include network-wide events
-            return parsedEvents.filter(event => 
-              event.type === 'GoalSet' || event.type === 'ContributionMade' || 
-              event.type === 'GoalCompleted' || event.type === 'AgentCreated'
+            return parsedEvents.filter(event =>
+              event.type === 'SessionSet' || event.type === 'ContributionMade' ||
+              event.type === 'SessionCompleted' || event.type === 'AgentCreated'
             );
           } catch (error) {
             // Skip individual transaction errors
@@ -490,21 +467,19 @@ export function createSubscriptionService(
  */
 function parseEventsFromLogs(
   logs: string[],
-  goalSlotId: bigint | null, // Make optional for network-wide events
+  sessionSlotId: bigint | null,
   signature: string,
-  timestamp: Date = new Date() // Transaction timestamp
-): GoalEvent[] {
-  const events: GoalEvent[] = [];
-  
-  
+  timestamp: Date = new Date()
+): SessionEvent[] {
+  const events: SessionEvent[] = [];
+
   for (const log of logs) {
-    // Anchor events appear as "Program data: <base64>"
     if (log.includes('Program data:')) {
       try {
         const dataMatch = log.match(/Program data: (.+)/);
         if (dataMatch) {
           const base64Data = dataMatch[1].trim();
-          const event = parseAnchorEvent(base64Data, goalSlotId, signature, timestamp);
+          const event = parseAnchorEvent(base64Data, sessionSlotId, signature, timestamp);
           if (event) {
             events.push(event);
           }
@@ -514,7 +489,7 @@ function parseEventsFromLogs(
       }
     }
   }
-  
+
   return events;
 }
 
@@ -550,13 +525,36 @@ const EVENT_DISCRIMINATORS = {
   taskClaimed: calculateEventDiscriminator('TaskClaimed'),
   taskResultSubmitted: calculateEventDiscriminator('TaskResultSubmitted'),
   taskValidationSubmitted: calculateEventDiscriminator('TaskValidationSubmitted'),
-  goalSet: calculateEventDiscriminator('GoalSet'),
+  sessionSet: calculateEventDiscriminator('SessionSet'),
   contributionMade: calculateEventDiscriminator('ContributionMade'),
-  goalCompleted: calculateEventDiscriminator('GoalCompleted'),
+  sessionCompleted: calculateEventDiscriminator('SessionCompleted'),
   nodeValidated: calculateEventDiscriminator('NodeValidated'),
   nodeRejected: calculateEventDiscriminator('NodeRejected'),
   agentCreated: calculateEventDiscriminator('AgentCreated'),
 } as const;
+
+/** Decoded event fields: generated types use camelCase; IDL can use snake_case. */
+type Decoded = Record<string, unknown>;
+
+function optSlot(v: unknown): bigint | undefined {
+  if (v == null) return undefined;
+  try {
+    if (!isSome(v as Parameters<typeof isSome>[0])) return undefined;
+    const raw = unwrapOption(v as Parameters<typeof unwrapOption>[0]);
+    return typeof raw === 'bigint' ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function str(d: Decoded, snake: string, camel: string): string {
+  return String((d[snake] ?? d[camel]) ?? '');
+}
+function bn(d: Decoded, snake: string, camel: string): bigint {
+  const v = d[snake] ?? d[camel];
+  if (typeof v === 'bigint') return v;
+  return BigInt(Number(v ?? 0));
+}
 
 /**
  * Parse Anchor event from base64 data using generated decoders
@@ -564,10 +562,10 @@ const EVENT_DISCRIMINATORS = {
  */
 function parseAnchorEvent(
   base64Data: string,
-  goalSlotId: bigint | null,
+  sessionSlotId: bigint | null,
   signature: string,
-  timestamp: Date = new Date() // Transaction timestamp
-): GoalEvent | null {
+  timestamp: Date = new Date()
+): SessionEvent | null {
   try {
     const buffer = Buffer.from(base64Data, 'base64');
     if (buffer.length < 8) return null;
@@ -575,166 +573,169 @@ function parseAnchorEvent(
     const discriminator = buffer.slice(0, 8);
     const eventData = new Uint8Array(buffer.slice(8));
 
-    // Decode events using generated decoders
     try {
-      if (discriminator.equals(EVENT_DISCRIMINATORS.goalSet)) {
-        const decoder = getGoalSetDecoder();
-        const decoded = decoder.decode(eventData);
-        
-        if (goalSlotId !== null && decoded.goalSlotId !== goalSlotId) {
-          return null;
-        }
-        
+      if (discriminator.equals(EVENT_DISCRIMINATORS.sessionSet)) {
+        const decoder = getSessionSetDecoder();
+        const d = decoder.decode(eventData) as unknown as Decoded;
+        const sid = (d.session_slot_id ?? d.sessionSlotId) as bigint;
+        if (sessionSlotId !== null && sid !== sessionSlotId) return null;
+        const tid = (d.task_slot_id ?? d.taskSlotId) as bigint;
         return {
-          type: 'GoalSet',
-          goalSlotId: decoded.goalSlotId,
-          taskSlotId: decoded.taskSlotId,
+          type: 'SessionSet',
+          sessionSlotId: sid,
+          taskSlotId: tid,
           timestamp,
           signature,
-          data: decoded,
+          data: {
+            sessionSlotId: sid,
+            owner: d.owner as Address,
+            taskSlotId: tid,
+            specificationCid: str(d, 'specification_cid', 'specificationCid'),
+            maxIterations: bn(d, 'max_iterations', 'maxIterations'),
+            initialDeposit: bn(d, 'initial_deposit', 'initialDeposit'),
+          },
         };
-      } else if (discriminator.equals(EVENT_DISCRIMINATORS.contributionMade)) {
+      }
+      if (discriminator.equals(EVENT_DISCRIMINATORS.contributionMade)) {
         const decoder = getContributionMadeDecoder();
-        const decoded = decoder.decode(eventData);
-        
-        if (goalSlotId !== null && decoded.goalSlotId !== goalSlotId) {
-          return null;
-        }
-        
+        const d = decoder.decode(eventData) as unknown as Decoded;
+        const sid = (d.session_slot_id ?? d.sessionSlotId) as bigint;
+        if (sessionSlotId !== null && sid !== sessionSlotId) return null;
         return {
           type: 'ContributionMade',
-          goalSlotId: decoded.goalSlotId,
+          sessionSlotId: sid,
           timestamp,
           signature,
-          data: decoded,
+          data: {
+            sessionSlotId: sid,
+            contributor: d.contributor as Address,
+            depositAmount: bn(d, 'deposit_amount', 'depositAmount'),
+            sharesMinted: bn(d, 'shares_minted', 'sharesMinted'),
+            totalShares: bn(d, 'total_shares', 'totalShares'),
+          },
         };
-      } else if (discriminator.equals(EVENT_DISCRIMINATORS.goalCompleted)) {
-        const decoder = getGoalCompletedDecoder();
-        const decoded = decoder.decode(eventData);
-        
-        if (goalSlotId !== null && decoded.goalSlotId !== goalSlotId) {
-          return null;
-        }
-        
+      }
+      if (discriminator.equals(EVENT_DISCRIMINATORS.sessionCompleted)) {
+        const decoder = getSessionCompletedDecoder();
+        const d = decoder.decode(eventData) as unknown as Decoded;
+        const sid = (d.session_slot_id ?? d.sessionSlotId) as bigint;
+        if (sessionSlotId !== null && sid !== sessionSlotId) return null;
         return {
-          type: 'GoalCompleted',
-          goalSlotId: decoded.goalSlotId,
+          type: 'SessionCompleted',
+          sessionSlotId: sid,
           timestamp,
           signature,
-          data: decoded,
+          data: {
+            sessionSlotId: sid,
+            finalIteration: bn(d, 'final_iteration', 'finalIteration'),
+            vaultBalance: bn(d, 'vault_balance', 'vaultBalance'),
+          },
         };
-      } else if (discriminator.equals(EVENT_DISCRIMINATORS.nodeValidated)) {
+      }
+      if (discriminator.equals(EVENT_DISCRIMINATORS.nodeValidated)) {
         const decoder = getNodeValidatedDecoder();
-        const decoded = decoder.decode(eventData);
-        
-        const goalSlotIdValue = isSome(decoded.goalSlotId) ? (unwrapOption(decoded.goalSlotId) ?? undefined) : undefined;
-        const taskSlotIdValue = isSome(decoded.taskSlotId) ? (unwrapOption(decoded.taskSlotId) ?? undefined) : undefined;
-        
-        if (goalSlotId !== null && goalSlotIdValue !== undefined && goalSlotIdValue !== goalSlotId) {
-          return null;
-        }
-        
+        const d = decoder.decode(eventData) as unknown as Decoded;
+        const sid = optSlot(d.goal_slot_id ?? d.goalSlotId);
+        const tid = optSlot(d.task_slot_id ?? d.taskSlotId);
+        if (sessionSlotId !== null && sid !== undefined && sid !== sessionSlotId) return null;
         return {
           type: 'NodeValidated',
-          goalSlotId: goalSlotIdValue,
-          taskSlotId: taskSlotIdValue,
+          sessionSlotId: sid,
+          taskSlotId: tid,
           timestamp,
           signature,
-          data: {
-            node: decoded.node,
-            validator: decoded.validator,
-            goalSlotId: goalSlotIdValue,
-            taskSlotId: taskSlotIdValue,
-          },
+          data: { node: d.node as Address, validator: d.validator as Address, sessionSlotId: sid, taskSlotId: tid },
         };
-      } else if (discriminator.equals(EVENT_DISCRIMINATORS.nodeRejected)) {
+      }
+      if (discriminator.equals(EVENT_DISCRIMINATORS.nodeRejected)) {
         const decoder = getNodeRejectedDecoder();
-        const decoded = decoder.decode(eventData);
-        
-        const goalSlotIdValue = isSome(decoded.goalSlotId) ? (unwrapOption(decoded.goalSlotId) ?? undefined) : undefined;
-        const taskSlotIdValue = isSome(decoded.taskSlotId) ? (unwrapOption(decoded.taskSlotId) ?? undefined) : undefined;
-        
-        if (goalSlotId !== null && goalSlotIdValue !== undefined && goalSlotIdValue !== goalSlotId) {
-          return null;
-        }
-        
+        const d = decoder.decode(eventData) as unknown as Decoded;
+        const sid = optSlot(d.goal_slot_id ?? d.goalSlotId);
+        const tid = optSlot(d.task_slot_id ?? d.taskSlotId);
+        if (sessionSlotId !== null && sid !== undefined && sid !== sessionSlotId) return null;
         return {
           type: 'NodeRejected',
-          goalSlotId: goalSlotIdValue,
-          taskSlotId: taskSlotIdValue,
+          sessionSlotId: sid,
+          taskSlotId: tid,
+          timestamp,
+          signature,
+          data: { node: d.node as Address, validator: d.validator as Address, sessionSlotId: sid, taskSlotId: tid },
+        };
+      }
+      if (discriminator.equals(EVENT_DISCRIMINATORS.agentCreated)) {
+        const decoder = getAgentCreatedDecoder();
+        const decoded = decoder.decode(eventData);
+        return { type: 'AgentCreated', timestamp, signature, data: decoded as AgentCreatedEvent };
+      }
+      if (discriminator.equals(EVENT_DISCRIMINATORS.taskClaimed)) {
+        const decoder = getTaskClaimedDecoder();
+        const d = decoder.decode(eventData) as unknown as Decoded;
+        const sid = (d.session_slot_id ?? d.sessionSlotId) as bigint;
+        if (sessionSlotId !== null && sid !== sessionSlotId) return null;
+        const tid = (d.task_slot_id ?? d.taskSlotId) as bigint;
+        return {
+          type: 'TaskClaimed',
+          sessionSlotId: sid,
+          taskSlotId: tid,
           timestamp,
           signature,
           data: {
-            node: decoded.node,
-            validator: decoded.validator,
-            goalSlotId: goalSlotIdValue,
-            taskSlotId: taskSlotIdValue,
+            sessionSlotId: sid,
+            taskSlotId: tid,
+            computeNode: (d.compute_node ?? d.computeNode) as Address,
+            maxTaskCost: bn(d, 'max_task_cost', 'maxTaskCost'),
           },
         };
-      } else if (discriminator.equals(EVENT_DISCRIMINATORS.agentCreated)) {
-        const decoder = getAgentCreatedDecoder();
-        const decoded = decoder.decode(eventData);
-        
-        return {
-          type: 'AgentCreated',
-          timestamp,
-          signature,
-          data: decoded,
-        };
-      } else if (discriminator.equals(EVENT_DISCRIMINATORS.taskClaimed)) {
-        const decoder = getTaskClaimedDecoder();
-        const decoded = decoder.decode(eventData);
-        
-        if (goalSlotId !== null && decoded.goalSlotId !== goalSlotId) {
-          return null;
-        }
-
-        return {
-          type: 'TaskClaimed',
-          goalSlotId: decoded.goalSlotId,
-          taskSlotId: decoded.taskSlotId,
-          timestamp,
-          signature,
-          data: decoded,
-        };
-      } else if (discriminator.equals(EVENT_DISCRIMINATORS.taskResultSubmitted)) {
+      }
+      if (discriminator.equals(EVENT_DISCRIMINATORS.taskResultSubmitted)) {
         const decoder = getTaskResultSubmittedDecoder();
-        const decoded = decoder.decode(eventData);
-
-        if (goalSlotId !== null && decoded.goalSlotId !== goalSlotId) {
-          return null;
-        }
-
+        const d = decoder.decode(eventData) as unknown as Decoded;
+        const sid = (d.session_slot_id ?? d.sessionSlotId) as bigint;
+        if (sessionSlotId !== null && sid !== sessionSlotId) return null;
+        const tid = (d.task_slot_id ?? d.taskSlotId) as bigint;
         return {
           type: 'TaskResultSubmitted',
-          goalSlotId: decoded.goalSlotId,
-          taskSlotId: decoded.taskSlotId,
+          sessionSlotId: sid,
+          taskSlotId: tid,
           timestamp,
           signature,
-          data: decoded,
+          data: {
+            sessionSlotId: sid,
+            taskSlotId: tid,
+            inputCid: str(d, 'input_cid', 'inputCid'),
+            outputCid: str(d, 'output_cid', 'outputCid'),
+          },
         };
-      } else if (discriminator.equals(EVENT_DISCRIMINATORS.taskValidationSubmitted)) {
+      }
+      if (discriminator.equals(EVENT_DISCRIMINATORS.taskValidationSubmitted)) {
         const decoder = getTaskValidationSubmittedDecoder();
-        const decoded = decoder.decode(eventData);
-
-        if (goalSlotId !== null && decoded.goalSlotId !== goalSlotId) {
-          return null;
-        }
-
+        const d = decoder.decode(eventData) as unknown as Decoded;
+        const sid = (d.session_slot_id ?? d.sessionSlotId) as bigint;
+        if (sessionSlotId !== null && sid !== sessionSlotId) return null;
+        const tid = (d.task_slot_id ?? d.taskSlotId) as bigint;
         return {
           type: 'TaskValidationSubmitted',
-          goalSlotId: decoded.goalSlotId,
-          taskSlotId: decoded.taskSlotId,
+          sessionSlotId: sid,
+          taskSlotId: tid,
           timestamp,
           signature,
-          data: decoded,
+          data: {
+            sessionSlotId: sid,
+            taskSlotId: tid,
+            validator: d.validator as Address,
+            paymentAmount: bn(d, 'payment_amount', 'paymentAmount'),
+            approved: Boolean(d.approved),
+            sessionCompleted: Boolean(d.session_completed ?? d.sessionCompleted),
+            currentIteration: bn(d, 'current_iteration', 'currentIteration'),
+            vaultBalance: bn(d, 'vault_balance', 'vaultBalance'),
+            lockedForTasks: bn(d, 'locked_for_tasks', 'lockedForTasks'),
+          },
         };
       }
     } catch (decodeError) {
       console.error('[parseAnchorEvent] Error decoding event data:', decodeError);
       return null;
     }
-
     return null;
   } catch (e) {
     console.error('[parseAnchorEvent] Failed to parse event:', e);

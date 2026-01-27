@@ -9,15 +9,15 @@ export type { Address } from '@solana/kit';
 export type {
   NetworkConfig,
   Agent,
-  Goal,
+  Session,
   Contribution,
   NodeInfo,
   Task,
 } from './generated/dac/accounts/index.js';
 export type { CodeMeasurement, CodeMeasurementArgs } from './generated/dac/types/codeMeasurement.js';
-export { NodeType, NodeStatus, AgentStatus, TaskStatus, GoalStatus } from './generated/dac/types/index.js';
-export { DAC_PROGRAM_ID, deriveNetworkConfigAddress, deriveAgentAddress, deriveGoalAddress, deriveTaskAddress, deriveContributionAddress, deriveGoalVaultAddress } from './dac/dacPdas.js';
-export { getNodeStatusName, getAgentStatusName, getTaskStatusName, getGoalStatusName } from './dac/statusUtils.js';
+export { NodeType, NodeStatus, AgentStatus, TaskStatus, SessionStatus } from './generated/dac/types/index.js';
+export { DAC_PROGRAM_ID, deriveNetworkConfigAddress, deriveAgentAddress, deriveSessionAddress, deriveTaskAddress, deriveContributionAddress, deriveSessionVaultAddress } from './dac/dacPdas.js';
+export { getNodeStatusName, getAgentStatusName, getTaskStatusName, getSessionStatusName } from './dac/statusUtils.js';
 
 // Instruction builders (for useWalletUiSignAndSend)
 export { getInitializeNetworkInstruction } from './generated/dac/instructions/index.js';
@@ -36,12 +36,13 @@ export type {
 } from './dac/configTypes.js';
 export { ConfigService } from './dac/configService.js';
 
-// Transaction signer interface
+// Transaction signer interface and params
 export type { TransactionSigner } from './dac/utils.js';
+export type { SubmitTaskParams } from './dac/dacService.js';
 
 // Subscription types
 export type {
-  GoalEvent,
+  SessionEvent,
   TaskClaimedEvent,
   TaskResultSubmittedEvent,
   TaskValidationSubmittedEvent,

@@ -7,7 +7,7 @@ type TransactionMessageType = TransactionMessage & TransactionMessageWithFeePaye
 import {
   deriveNetworkConfigAddress,
   deriveAgentAddress,
-  deriveGoalAddress,
+  deriveSessionAddress,
   deriveTaskAddress,
   deriveNodeInfoAddress,
 } from './dacPdas.js';
@@ -15,25 +15,26 @@ import {
   getActivateNodeInstruction,
   getInitializeNetworkInstruction,
   getCreateAgentInstruction,
-  getCreateGoalInstruction,
-  getSetGoalInstructionAsync,
-  getContributeToGoalInstructionAsync,
-  getWithdrawFromGoalInstructionAsync,
+  getCreateSessionInstruction,
+  getSetSessionInstructionAsync,
+  getContributeToSessionInstructionAsync,
+  getWithdrawFromSessionInstructionAsync,
   getRegisterNodeInstructionAsync,
   getUpdateNetworkConfigInstructionAsync,
+  getSubmitTaskInstruction,
   type InitializeNetworkInput,
   type CreateAgentInput,
-  type CreateGoalInput,
-  type SetGoalAsyncInput,
-  type ContributeToGoalAsyncInput,
-  type WithdrawFromGoalAsyncInput,
+  type CreateSessionInput,
+  type SetSessionAsyncInput,
+  type ContributeToSessionAsyncInput,
+  type WithdrawFromSessionAsyncInput,
   type RegisterNodeAsyncInput,
   type UpdateNetworkConfigAsyncInput,
 } from '../generated/dac/instructions/index.js';
 import { AgentStatus } from '../generated/dac/types/index.js';
-import { 
+import {
   fetchMaybeNetworkConfig,
-  fetchMaybeGoal,
+  fetchMaybeSession,
   fetchMaybeTask,
   fetchMaybeAgent,
 } from '../generated/dac/accounts/index.js';
@@ -43,10 +44,11 @@ import type {
   InitializeNetworkParams,
   RegisterNodeParams,
   CreateAgentParams,
-  CreateGoalParams,
-  SetGoalParams,
-  ContributeToGoalParams,
-  WithdrawFromGoalParams,
+  CreateSessionParams,
+  SetSessionParams,
+  ContributeToSessionParams,
+  WithdrawFromSessionParams,
+  SubmitTaskParams,
   UpdateNetworkConfigParams,
   ActivateNodeParams,
 } from './dacService.js';
@@ -76,12 +78,6 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
       );
 
       const remainingAccounts: Address[] = [];
-
-      for (let goalId = 0; goalId < params.allocateGoals; goalId++) {
-        const goalAddress = await deriveGoalAddress(programAddress, networkConfigAddress, BigInt(goalId));
-        remainingAccounts.push(goalAddress);
-      }
-
       for (let taskId = 0; taskId < params.allocateTasks; taskId++) {
         const taskAddress = await deriveTaskAddress(programAddress, networkConfigAddress, BigInt(taskId));
         remainingAccounts.push(taskAddress);
@@ -91,11 +87,10 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
         authority: address(params.authority.address) as any,
         networkConfig: networkConfigAddress,
         cidConfig: params.cidConfig,
-        allocateGoals: params.allocateGoals,
         allocateTasks: params.allocateTasks,
         approvedCodeMeasurements: params.approvedCodeMeasurements,
         requiredValidations: params.requiredValidations,
-      };
+      } as InitializeNetworkInput;
 
       const instruction = getInitializeNetworkInstruction(input, {
         programAddress,
@@ -168,129 +163,109 @@ export function createTransactionService(deps: DacServiceDeps): ITransactionServ
       return { transactionMessage, agentAddress, agentSlotId };
     },
 
-    async createGoal(params: CreateGoalParams): Promise<{ transactionMessage: TransactionMessageType; goalAddress: Address; goalSlotId: bigint; taskAddress: Address; taskSlotId: bigint }> {
+    async createSession(params: CreateSessionParams): Promise<{ transactionMessage: TransactionMessageType; sessionAddress: Address; sessionSlotId: bigint; taskAddress: Address; taskSlotId: bigint }> {
       const account = await fetchMaybeNetworkConfig(rpc, params.networkConfig);
       if (!account.exists || !account.data) {
         throw new Error('Network config not found');
       }
-      const networkConfigData = account.data;
-
-      const goalSlotId = networkConfigData.goalCount;
-      const taskSlotId = networkConfigData.taskCount;
-      const goalAddress = await deriveGoalAddress(programAddress, params.networkConfig, goalSlotId);
+      const networkConfigData = account.data as { sessionCount?: bigint; taskCount?: bigint };
+      const sessionSlotId = networkConfigData.sessionCount!;
+      const taskSlotId = networkConfigData.taskCount!;
+      const sessionAddress = await deriveSessionAddress(programAddress, params.networkConfig, sessionSlotId);
       const taskAddress = await deriveTaskAddress(programAddress, params.networkConfig, taskSlotId);
 
-      const input: CreateGoalInput = {
+      const input: CreateSessionInput = {
         payer: address(params.payer.address) as any,
         owner: address(params.owner.address) as any,
         networkConfig: params.networkConfig,
-        goal: goalAddress,
+        session: sessionAddress,
         task: taskAddress,
         isOwned: params.isOwned,
         isConfidential: params.isConfidential,
       };
 
-      const instruction = getCreateGoalInstruction(input, {
-        programAddress,
-      });
-
+      const instruction = getCreateSessionInstruction(input, { programAddress });
       const { transactionMessage } = await buildTransactionWithRpc(params.payer, [instruction]);
-
-      return { transactionMessage, goalAddress, goalSlotId, taskAddress, taskSlotId };
+      return { transactionMessage, sessionAddress, sessionSlotId, taskAddress, taskSlotId };
     },
 
-    async setGoal(params: SetGoalParams): Promise<TransactionMessageType> {
-      const goalAddress = await deriveGoalAddress(programAddress, params.networkConfig, params.goalSlotId);
-      const agentAddress = await deriveAgentAddress(programAddress, params.networkConfig, params.agentSlotId);
+    async setSession(params: SetSessionParams): Promise<TransactionMessageType> {
+      const sessionAddress = await deriveSessionAddress(programAddress, params.networkConfig, params.sessionSlotId);
       const taskAddress = await deriveTaskAddress(programAddress, params.networkConfig, params.taskSlotId);
+      const agentAddress = await deriveAgentAddress(programAddress, params.networkConfig, params.agentSlotId);
 
-
-      // Check if accounts exist using the proper fetch functions
-      try {
-        const goalAccount = await fetchMaybeGoal(rpc, goalAddress);
-        if (!goalAccount.exists) {
-          throw new Error(`Goal account does not exist for slotId ${params.goalSlotId.toString()}. Make sure the goal was created first.`);
-        }
-      } catch (error: any) {
-        console.error('[setGoal] Error checking goal account:', error);
-        throw new Error(`Failed to check goal account: ${error.message}`);
+      const sessionAccount = await fetchMaybeSession(rpc, sessionAddress);
+      if (!sessionAccount.exists) {
+        throw new Error(`Session account does not exist for slotId ${params.sessionSlotId.toString()}. Create the session first.`);
+      }
+      const taskAccount = await fetchMaybeTask(rpc, taskAddress);
+      if (!taskAccount.exists) {
+        throw new Error(`Task account does not exist for slotId ${params.taskSlotId.toString()}.`);
       }
 
-      try {
-        const taskAccount = await fetchMaybeTask(rpc, taskAddress);
-        if (!taskAccount.exists) {
-          throw new Error(`Task account does not exist for slotId ${params.taskSlotId.toString()}. Make sure the task was created first.`);
-        }
-      } catch (error: any) {
-        console.error('[setGoal] Error checking task account:', error);
-        throw new Error(`Failed to check task account: ${error.message}`);
-      }
-
-      try {
-        const agentAccount = await fetchMaybeAgent(rpc, agentAddress);
-        if (!agentAccount.exists) {
-          throw new Error(`Agent account does not exist for slotId ${params.agentSlotId.toString()}. Make sure the agent was created and activated first.`);
-        }
-        if (agentAccount.data && agentAccount.data.status !== AgentStatus.Active) {
-          throw new Error(`Agent is not active. Current status: ${agentAccount.data.status}. The agent must be activated before setting a goal.`);
-        }
-      } catch (error: any) {
-        console.error('[setGoal] Error checking agent account:', error);
-        throw new Error(`Failed to check agent account: ${error.message}`);
-      }
-
-      const input: SetGoalAsyncInput = {
+      const taskType = (params.taskType.type === 'Completion')
+        ? { completion: params.taskType.modelId }
+        : (params.taskType.type === 'Custom')
+          ? { custom: params.taskType.moduleId }
+          : { humanInLoop: true };
+      const input: SetSessionAsyncInput = {
         owner: address(params.owner.address) as any,
-        goal: goalAddress,
+        session: sessionAddress,
         task: taskAddress,
         agent: agentAddress,
         networkConfig: params.networkConfig,
         specificationCid: params.specificationCid,
         maxIterations: params.maxIterations,
         initialDeposit: params.initialDeposit,
+        computeNode: params.computeNode,
+        taskType: taskType as any,
       };
 
-      const instruction = await getSetGoalInstructionAsync(input, {
-        programAddress,
-      });
-
+      const instruction = await getSetSessionInstructionAsync(input, { programAddress });
       const { transactionMessage } = await buildTransactionWithRpc(params.owner, [instruction]);
       return transactionMessage;
     },
 
-    async contributeToGoal(params: ContributeToGoalParams): Promise<TransactionMessageType> {
-      const goalAddress = await deriveGoalAddress(programAddress, params.networkConfig, params.goalSlotId);
-
-      const input: ContributeToGoalAsyncInput = {
+    async contributeToSession(params: ContributeToSessionParams): Promise<TransactionMessageType> {
+      const sessionAddress = await deriveSessionAddress(programAddress, params.networkConfig, params.sessionSlotId);
+      const input: ContributeToSessionAsyncInput = {
         contributor: address(params.contributor.address) as any,
-        goal: goalAddress,
+        session: sessionAddress,
         networkConfig: params.networkConfig,
         depositAmount: params.depositAmount,
       };
-
-      const instruction = await getContributeToGoalInstructionAsync(input, {
-        programAddress,
-      });
-
+      const instruction = await getContributeToSessionInstructionAsync(input, { programAddress });
       const { transactionMessage } = await buildTransactionWithRpc(params.contributor, [instruction]);
       return transactionMessage;
     },
 
-    async withdrawFromGoal(params: WithdrawFromGoalParams): Promise<TransactionMessageType> {
-      const goalAddress = await deriveGoalAddress(programAddress, params.networkConfig, params.goalSlotId);
-
-      const input: WithdrawFromGoalAsyncInput = {
+    async withdrawFromSession(params: WithdrawFromSessionParams): Promise<TransactionMessageType> {
+      const sessionAddress = await deriveSessionAddress(programAddress, params.networkConfig, params.sessionSlotId);
+      const input: WithdrawFromSessionAsyncInput = {
         contributor: address(params.contributor.address) as any,
-        goal: goalAddress,
+        session: sessionAddress,
         networkConfig: params.networkConfig,
         sharesToBurn: params.sharesToBurn,
       };
-
-      const instruction = await getWithdrawFromGoalInstructionAsync(input, {
-        programAddress,
-      });
-
+      const instruction = await getWithdrawFromSessionInstructionAsync(input, { programAddress });
       const { transactionMessage } = await buildTransactionWithRpc(params.contributor, [instruction]);
+      return transactionMessage;
+    },
+
+    async submitTask(params: SubmitTaskParams): Promise<TransactionMessageType> {
+      const sessionAddress = await deriveSessionAddress(programAddress, params.networkConfig, params.sessionSlotId);
+      const taskAddress = await deriveTaskAddress(programAddress, params.networkConfig, params.taskSlotId);
+      const instruction = getSubmitTaskInstruction(
+        {
+          owner: address(params.owner.address) as any,
+          task: taskAddress,
+          session: sessionAddress,
+          networkConfig: params.networkConfig,
+          inputCid: params.inputCid,
+        } as any,
+        { programAddress }
+      );
+      const { transactionMessage } = await buildTransactionWithRpc(params.owner, [instruction]);
       return transactionMessage;
     },
 

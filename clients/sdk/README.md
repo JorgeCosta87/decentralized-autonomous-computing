@@ -25,7 +25,6 @@ const dacClient = new DacSDK(client);
 const { signature, networkConfigAddress } = await dacClient.initializeNetwork({
   authority: myKeypair,
   cidConfig: 'QmNetworkConfig...',
-  allocateGoals: 10n,
   allocateTasks: 10n,
   approvedCodeMeasurements: [...],
   requiredValidations: 1
@@ -46,8 +45,8 @@ const { signature, agentAddress, agentSlotId } = await dacClient.createAgent({
   agentConfigCid: 'QmXXX...'
 });
 
-// Create goal
-const { signature, goalAddress, goalSlotId, taskAddress, taskSlotId } = await dacClient.createGoal({
+// Create session
+const { signature, sessionAddress, sessionSlotId, taskAddress, taskSlotId } = await dacClient.createSession({
   payer: myKeypair,
   owner: myKeypair,
   networkConfig: networkConfigAddress,
@@ -55,31 +54,33 @@ const { signature, goalAddress, goalSlotId, taskAddress, taskSlotId } = await da
   isConfidential: false
 });
 
-// Set goal specification
-await dacClient.setGoal({
+// Set session specification
+await dacClient.setSession({
   owner: myKeypair,
   networkConfig: networkConfigAddress,
-  goalSlotId: goalSlotId,
-  agentSlotId: agentSlotId,
-  taskSlotId: taskSlotId,
-  specificationCid: 'QmGoalSpec...',
+  sessionSlotId,
+  taskSlotId,
+  agentSlotId,
+  specificationCid: 'QmSessionSpec...',
   maxIterations: 10n,
-  initialDeposit: 1000000000n
+  initialDeposit: 1000000000n,
+  computeNode: computeNodeAddress,
+  taskType: { type: 'HumanInLoop' }
 });
 
-// Contribute to goal
-await dacClient.contributeToGoal({
+// Contribute to session
+await dacClient.contributeToSession({
   contributor: myKeypair,
   networkConfig: networkConfigAddress,
-  goalSlotId: goalSlotId,
+  sessionSlotId,
   depositAmount: 1000000000n
 });
 
-// Withdraw from goal
-await dacClient.withdrawFromGoal({
+// Withdraw from session
+await dacClient.withdrawFromSession({
   contributor: myKeypair,
   networkConfig: networkConfigAddress,
-  goalSlotId: goalSlotId,
+  sessionSlotId,
   sharesToBurn: 1000000n
 });
 
@@ -111,9 +112,9 @@ const agent = await dacClient.getAgentBySlot(networkConfigAddress, 0n);
 const agents = await dacClient.getAgentsByStatus(AgentStatus.Validated);
 const pendingAgents = await dacClient.getAgentsByStatus(AgentStatus.Pending);
 
-// Goals
-const goal = await dacClient.getGoal(networkConfigAddress, goalSlotId);
-const goals = await dacClient.getGoalsByStatus(GoalStatus.Active);
+// Sessions
+const session = await dacClient.getSession(networkConfigAddress, sessionSlotId);
+const sessions = await dacClient.getSessionsByStatus(SessionStatus.Active);
 
 // Tasks
 const task = await dacClient.getTask(networkConfigAddress, taskSlotId);
@@ -128,7 +129,7 @@ const publicNodes = await dacClient.getNodesByStatus({
 });
 
 // Contributions
-const contribution = await dacClient.getContribution(goalAddress, contributorAddress);
+const contribution = await dacClient.getContribution(sessionAddress, contributorAddress);
 ```
 
 ### Status Monitoring
@@ -214,7 +215,6 @@ const ipfsClient = new IpfsClient({ apiUrl: 'http://localhost:5001' });
 const { signature, networkConfigAddress } = await dacClient.initializeNetwork({
   authority: authorityKeypair,
   cidConfig: 'QmNetworkConfig...',
-  allocateGoals: 10n,
   allocateTasks: 100n,
   approvedCodeMeasurements: [...],
   requiredValidations: 1
@@ -241,25 +241,27 @@ const validatedAgents = await dacClient.waitForAgentsStatus(
   }
 );
 
-// 6. Create a goal
-const { signature, goalAddress, goalSlotId, taskAddress, taskSlotId } = await dacClient.createGoal({
-  payer: goalOwnerKeypair,
-  owner: goalOwnerKeypair,
+// 6. Create a session
+const { signature, sessionAddress, sessionSlotId, taskAddress, taskSlotId } = await dacClient.createSession({
+  payer: sessionOwnerKeypair,
+  owner: sessionOwnerKeypair,
   networkConfig: networkConfigAddress,
   isOwned: true,
   isConfidential: false
 });
 
-// 7. Set goal specification
-await dacClient.setGoal({
-  owner: goalOwnerKeypair,
+// 7. Set session specification
+await dacClient.setSession({
+  owner: sessionOwnerKeypair,
   networkConfig: networkConfigAddress,
-  goalSlotId: goalSlotId,
-  agentSlotId: agentSlotId,
-  taskSlotId: taskSlotId,
-  specificationCid: 'QmGoalSpec...',
+  sessionSlotId,
+  taskSlotId,
+  agentSlotId,
+  specificationCid: 'QmSessionSpec...',
   maxIterations: 10n,
-  initialDeposit: 1000000000n
+  initialDeposit: 1000000000n,
+  computeNode: computeNodeAddress,
+  taskType: { type: 'HumanInLoop' }
 });
 
 // 8. Wait for nodes to become active

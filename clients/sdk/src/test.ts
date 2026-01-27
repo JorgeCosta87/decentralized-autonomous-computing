@@ -1,12 +1,12 @@
 import { createSolanaClient } from 'gill';
 import { DacSDK, NodeType, DAC_PROGRAM_ID, IpfsClient, WaitMode } from './index.js';
 import { NodeStatus } from './generated/dac/types/index.js';
-import { deriveNetworkConfigAddress, deriveNodeInfoAddress, deriveAgentAddress, deriveGoalAddress, deriveTaskAddress } from './dac/dacPdas.js';
+import { deriveNetworkConfigAddress, deriveNodeInfoAddress, deriveAgentAddress, deriveSessionAddress, deriveTaskAddress } from './dac/dacPdas.js';
 import { loadTestKeypairs } from './load-test-keypairs.js';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { AgentStatus, GoalStatus, TaskStatus } from './generated/dac/index.js';
+import { AgentStatus, SessionStatus, TaskStatus } from './generated/dac/index.js';
 
 /**
  * Test file for DAC SDK functions
@@ -71,10 +71,10 @@ async function main() {
     console.log('  Network Config Details:');
     console.log(`    Network Config CID: ${existingNetworkConfig.cidConfig}`);
     console.log(`    Agent Count: ${existingNetworkConfig.agentCount}`);
-    console.log(`    Goal Count: ${existingNetworkConfig.goalCount}`);
+    console.log(`    Session Count: ${existingNetworkConfig.sessionCount}`);
     console.log(`    Task Count: ${existingNetworkConfig.taskCount}`);
-    console.log(`    Confidential Node Count: ${existingNetworkConfig.confidentialNodeCount}`);
-    console.log(`    Public Node Count: ${existingNetworkConfig.publicNodeCount}\n`);
+    console.log(`    Confidential Node Count: ${existingNetworkConfig.approvedConfidentialNodes.length}`);
+    console.log(`    Public Node Count: ${existingNetworkConfig.approvedPublicNodes.length}\n`);
     console.log('Skipping initialization...\n');
   } else {
     try {
@@ -84,7 +84,6 @@ async function main() {
       const networkConfigCid = await ipfsClient.uploadYamlConfig(networkConfigYaml, 'network-config.json');
       console.log(`  Network Config CID: ${networkConfigCid}\n`);
 
-      const allocateGoals = 5n;
       const allocateTasks = 5n;
       const approvedCodeMeasurements = [
         {
@@ -98,7 +97,6 @@ async function main() {
 
       console.log('Network not found. Initializing network...\n');
       console.log('Parameters:');
-      console.log(`  Allocate Goals: ${allocateGoals}`);
       console.log(`  Allocate Tasks: ${allocateTasks}`);
       console.log(`  Approved Code Measurements: ${approvedCodeMeasurements.length}\n`);
 
@@ -106,7 +104,6 @@ async function main() {
         await dacClient.initializeNetwork({
           authority: keypairs.authority,
           cidConfig: networkConfigCid,
-          allocateGoals,
           allocateTasks,
           approvedCodeMeasurements,
           requiredValidations: 1,
@@ -121,10 +118,10 @@ async function main() {
       if (networkConfig) {
         console.log('✅ Network config fetched:');
         console.log(`  Agent Count: ${networkConfig.agentCount}`);
-        console.log(`  Goal Count: ${networkConfig.goalCount}`);
+        console.log(`  Session Count: ${networkConfig.sessionCount}`);
         console.log(`  Task Count: ${networkConfig.taskCount}`);
-        console.log(`  Confidential Node Count: ${networkConfig.confidentialNodeCount}`);
-        console.log(`  Public Node Count: ${networkConfig.publicNodeCount}\n`);
+        console.log(`  Confidential Node Count: ${networkConfig.approvedConfidentialNodes.length}`);
+        console.log(`  Public Node Count: ${networkConfig.approvedPublicNodes.length}\n`);
       } else {
         console.log('⚠️  Network config not found (may need to wait for confirmation)\n');
       }
@@ -343,10 +340,10 @@ async function main() {
   }
 
   // ============================================================================
-  // Test 5: Create and Set Goal
+  // Test 5: Create and Set Session
   // ============================================================================
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('Test 5: Create and Set Goal');
+  console.log('Test 5: Create and Set Session');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   try {
@@ -398,8 +395,8 @@ async function main() {
     agentSlotId = activeAgentSlotId!;
     agentAddress = activeAgentAddress!;
 
-    console.log('Creating goal (which also creates a task)...');
-    const { signature: createGoalSignature, goalAddress, goalSlotId, taskAddress, taskSlotId } = await dacClient.createGoal({
+    console.log('Creating session (which also creates a task)...');
+    const { signature: createSessionSignature, sessionAddress, sessionSlotId, taskAddress, taskSlotId } = await dacClient.createSession({
       payer: keypairs.authority,
       owner: keypairs.authority,
       networkConfig: networkConfigAddr,
@@ -407,21 +404,21 @@ async function main() {
       isConfidential: false,
     });
 
-    console.log('✅ Goal and task created successfully!');
-    console.log(`  Transaction Signature: ${createGoalSignature}`);
-    console.log(`  Goal Address: ${goalAddress}`);
-    console.log(`  Goal Slot ID: ${goalSlotId}`);
+    console.log('✅ Session and task created successfully!');
+    console.log(`  Transaction Signature: ${createSessionSignature}`);
+    console.log(`  Session Address: ${sessionAddress}`);
+    console.log(`  Session Slot ID: ${sessionSlotId}`);
     console.log(`  Task Address: ${taskAddress}`);
     console.log(`  Task Slot ID: ${taskSlotId}\n`);
 
-    // Verify goal and task were created
-    const createdGoal = await dacClient.getGoal(networkConfigAddr, goalSlotId);
+    // Verify session and task were created
+    const createdSession = await dacClient.getSession(networkConfigAddr, sessionSlotId);
     const createdTask = await dacClient.getTask(networkConfigAddr, taskSlotId);
     
-    if (createdGoal) {
-      console.log('✅ Goal verified:');
-      console.log(`  Status: ${createdGoal.status}`);
-      console.log(`  Linked Task: ${createdGoal.task}`);
+    if (createdSession) {
+      console.log('✅ Session verified:');
+      console.log(`  Status: ${createdSession.status}`);
+      console.log(`  Linked Task: ${createdSession.task}`);
     }
     
     if (createdTask) {
@@ -429,71 +426,75 @@ async function main() {
       console.log(`  Status: ${createdTask.status}\n`);
     }
 
-    // Upload goal specification to IPFS
-    console.log('Uploading goal specification to IPFS...');
+    // Upload specification to IPFS
+    console.log('Uploading specification to IPFS...');
     const goalSpecYaml = readFileSync(join(__dirname, '../test-configs/goal-specification.yaml'), 'utf-8');
     const specificationCid = await ipfsClient.uploadYamlConfig(goalSpecYaml, 'goal-specification.json');
-    console.log(`  Goal Specification CID: ${specificationCid}\n`);
+    console.log(`  Specification CID: ${specificationCid}\n`);
 
-    console.log('Setting goal...');
+    const computeNode = keypairs.publicNodes[0]?.address ?? keypairs.nodeOwner.address;
+    console.log('Setting session...');
     console.log('Parameters:');
-    console.log(`  Goal Slot ID: ${goalSlotId}`);
+    console.log(`  Session Slot ID: ${sessionSlotId}`);
     console.log(`  Agent Slot ID: ${agentSlotId}`);
     console.log(`  Task Slot ID: ${taskSlotId}`);
+    console.log(`  Compute Node: ${computeNode}`);
     console.log(`  Max Iterations: 5`);
     console.log(`  Initial Deposit: 0.5 SOL\n`);
 
-    const setGoalSignature = await dacClient.setGoal({
+    const setSessionSignature = await dacClient.setSession({
       owner: keypairs.authority,
       networkConfig: networkConfigAddr,
-      goalSlotId,
-      agentSlotId,
+      sessionSlotId,
       taskSlotId,
+      agentSlotId,
       specificationCid,
       maxIterations: 5n,
       initialDeposit: 500_000_000n,
+      computeNode,
+      taskType: { type: 'HumanInLoop' },
     });
 
-    console.log('✅ Goal set successfully!');
-    console.log(`  Transaction Signature: ${setGoalSignature}\n`);
+    console.log('✅ Session set successfully!');
+    console.log(`  Transaction Signature: ${setSessionSignature}\n`);
 
-    // Wait for goal to reach Ready status
-    console.log('Waiting for goal to reach Ready status...');
+    // Wait for session to reach Active status
+    console.log('Waiting for session to reach Active status...');
     try {
-      const readyGoals = await dacClient.waitForGoalsStatus(
-        [goalAddress],
-        GoalStatus.Ready,
+      const activeSessions = await dacClient.waitForSessionsStatus(
+        [sessionAddress],
+        SessionStatus.Active,
         {
           timeoutMs: 60000,
           waitMode: WaitMode.First
         }
       );
 
-      if (readyGoals.length > 0) {
-        console.log('✅ Goal reached Ready status!');
-        console.log(`  Goal Status: ${readyGoals[0].status}\n`);
+      if (activeSessions.length > 0) {
+        console.log('✅ Session reached Active status!');
+        console.log(`  Session Status: ${activeSessions[0].status}\n`);
       }
     } catch (error: any) {
       if (error.message?.includes('Timeout')) {
-        console.log('⚠️  Timeout waiting for goal to reach Ready status.');
-        console.log('   Goal may still be processing...\n');
+        console.log('⚠️  Timeout waiting for session to reach Active status.');
+        console.log('   Session may still be processing...\n');
       } else {
         throw error;
       }
     }
 
-    const createdGoalData = await dacClient.getGoal(networkConfigAddr, goalSlotId);
-    if (createdGoalData) {
-      console.log('✅ Goal verified:');
-      console.log(`  Status: ${createdGoalData.status}`);
-      console.log(`  Linked Task: ${createdGoalData.task}`);
+    const createdSessionData = await dacClient.getSession(networkConfigAddr, sessionSlotId);
+    if (createdSessionData) {
+      console.log('✅ Session verified:');
+      console.log(`  Status: ${createdSessionData.status}`);
+      console.log(`  Linked Task: ${createdSessionData.task}`);
     } else {
-      console.log('⚠️  Goal not found.');
-      console.log('   Goal may still be processing...\n');
+      console.log('⚠️  Session not found.');
+      console.log('   Session may still be processing...\n');
     }
 
   } catch (error) {
-    console.error('❌ Failed to set goal:');
+    console.error('❌ Failed to set session:');
     console.error(error);
     process.exit(1);
   }

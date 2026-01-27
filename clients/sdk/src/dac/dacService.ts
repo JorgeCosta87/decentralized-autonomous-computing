@@ -2,12 +2,13 @@ import type { Address, Rpc, TransactionMessage, TransactionMessageWithFeePayer, 
 import type {
   NetworkConfig,
   Agent,
-  Goal,
+  Session,
   Contribution,
   NodeInfo,
   Task,
 } from '../generated/dac/accounts/index.js';
-import type { NodeStatus, AgentStatus, TaskStatus, GoalStatus, NodeType, CodeMeasurementArgs } from '../generated/dac/types/index.js';
+import type { NodeStatus, AgentStatus, TaskStatus, SessionStatus, NodeType, CodeMeasurementArgs } from '../generated/dac/types/index.js';
+
 import type { WaitMode } from './dacMonitoring.js';
 import type { TransactionSigner } from './utils.js';
 
@@ -27,30 +28,27 @@ export interface IQueryService {
   getNetworkConfig(authority?: Address): Promise<NetworkConfig | null>;
   getAgent(agentAddress: Address): Promise<Agent | null>;
   getAgentBySlot(networkConfig: Address, agentSlotId: bigint): Promise<Agent | null>;
-  getGoal(networkConfig: Address, goalSlotId: bigint): Promise<Goal | null>;
+  getSession(networkConfig: Address, sessionSlotId: bigint): Promise<Session | null>;
   getTask(networkConfig: Address, taskSlotId: bigint): Promise<Task | null>;
-  getContribution(goal: Address, contributor: Address): Promise<Contribution | null>;
+  getContribution(session: Address, contributor: Address): Promise<Contribution | null>;
   getNodeInfo(nodePubkey: Address): Promise<NodeInfo | null>;
   getNodesByStatus(params?: { status?: NodeStatus; nodeType?: NodeType }): Promise<NodeInfo[]>;
   getAgentsByStatus(status?: AgentStatus): Promise<Agent[]>;
   getTasksByStatus(status?: TaskStatus): Promise<Task[]>;
-  getGoalsByStatus(status?: GoalStatus): Promise<Goal[]>;
-  
-  // Batch methods for efficient bulk operations
-  batchGetContributionsForGoals(
+  getSessionsByStatus(status?: SessionStatus): Promise<Session[]>;
+
+  batchGetContributionsForSessions(
     networkConfig: Address,
-    goalSlotIds: bigint[],
+    sessionSlotIds: bigint[],
     contributorAddress: Address
   ): Promise<Map<bigint, Contribution | null>>;
-  
   batchGetVaultBalances(
     networkConfig: Address,
-    goalSlotIds: bigint[]
+    sessionSlotIds: bigint[]
   ): Promise<Map<bigint, { balance: bigint; rentExempt: bigint }>>;
-  
-  getContributorsForGoals(
+  getContributorsForSessions(
     networkConfig: Address,
-    goalSlotIds: bigint[]
+    sessionSlotIds: bigint[]
   ): Promise<Map<bigint, { count: number; contributors: Array<{ address: Address; shares: bigint }> }>>;
 }
 
@@ -60,7 +58,7 @@ export interface IQueryService {
 export type InitializeNetworkParams = {
   authority: TransactionSigner;
   cidConfig: string;
-  allocateGoals: bigint;
+  /** Number of task PDAs to pre-allocate; no sessions/goals are pre-allocated on init. */
   allocateTasks: bigint;
   approvedCodeMeasurements: CodeMeasurementArgs[];
   requiredValidations: number;
@@ -79,7 +77,7 @@ export type CreateAgentParams = {
   agentConfigCid: string;
 };
 
-export type CreateGoalParams = {
+export type CreateSessionParams = {
   payer: TransactionSigner;
   owner: TransactionSigner;
   networkConfig: Address;
@@ -87,29 +85,41 @@ export type CreateGoalParams = {
   isConfidential: boolean;
 };
 
-export type SetGoalParams = {
+export type SetSessionParams = {
   owner: TransactionSigner;
   networkConfig: Address;
-  goalSlotId: bigint;
-  agentSlotId: bigint;
+  sessionSlotId: bigint;
   taskSlotId: bigint;
+  agentSlotId: bigint;
   specificationCid: string;
   maxIterations: bigint;
   initialDeposit: bigint;
+  /** Compute node pubkey to assign to the task. */
+  computeNode: Address;
+  /** Task type (e.g. Completion(model_id), Custom(module_id), HumanInLoop). */
+  taskType: { type: 'Completion'; modelId: bigint } | { type: 'Custom'; moduleId: bigint } | { type: 'HumanInLoop' };
 };
 
-export type ContributeToGoalParams = {
+export type ContributeToSessionParams = {
   contributor: TransactionSigner;
   networkConfig: Address;
-  goalSlotId: bigint;
+  sessionSlotId: bigint;
   depositAmount: bigint;
 };
 
-export type WithdrawFromGoalParams = {
+export type WithdrawFromSessionParams = {
   contributor: TransactionSigner;
   networkConfig: Address;
-  goalSlotId: bigint;
+  sessionSlotId: bigint;
   sharesToBurn: bigint;
+};
+
+export type SubmitTaskParams = {
+  owner: TransactionSigner;
+  networkConfig: Address;
+  sessionSlotId: bigint;
+  taskSlotId: bigint;
+  inputCid: string;
 };
 
 export type UpdateNetworkConfigParams = {
@@ -132,10 +142,11 @@ export interface ITransactionService {
   initializeNetwork(params: InitializeNetworkParams): Promise<{ transactionMessage: TransactionMessageType; networkConfigAddress: Address }>;
   registerNode(params: RegisterNodeParams): Promise<{ transactionMessage: TransactionMessageType; nodeInfoAddress: Address; nodeTreasuryAddress: Address }>;
   createAgent(params: CreateAgentParams): Promise<{ transactionMessage: TransactionMessageType; agentAddress: Address; agentSlotId: bigint }>;
-  createGoal(params: CreateGoalParams): Promise<{ transactionMessage: TransactionMessageType; goalAddress: Address; goalSlotId: bigint; taskAddress: Address; taskSlotId: bigint }>;
-  setGoal(params: SetGoalParams): Promise<TransactionMessageType>;
-  contributeToGoal(params: ContributeToGoalParams): Promise<TransactionMessageType>;
-  withdrawFromGoal(params: WithdrawFromGoalParams): Promise<TransactionMessageType>;
+  createSession(params: CreateSessionParams): Promise<{ transactionMessage: TransactionMessageType; sessionAddress: Address; sessionSlotId: bigint; taskAddress: Address; taskSlotId: bigint }>;
+  setSession(params: SetSessionParams): Promise<TransactionMessageType>;
+  contributeToSession(params: ContributeToSessionParams): Promise<TransactionMessageType>;
+  withdrawFromSession(params: WithdrawFromSessionParams): Promise<TransactionMessageType>;
+  submitTask(params: SubmitTaskParams): Promise<TransactionMessageType>;
   updateNetworkConfig(params: UpdateNetworkConfigParams): Promise<TransactionMessageType>;
   activateNode(params: ActivateNodeParams): Promise<TransactionMessageType>;
 }
@@ -156,12 +167,12 @@ export interface IMonitoringService {
     options?: { timeoutMs?: number; waitMode?: WaitMode }
   ): Promise<Agent[]>;
   
-  waitForGoalsStatus(
-    goalAddresses: Address[],
-    targetStatus: GoalStatus,
+  waitForSessionsStatus(
+    sessionAddresses: Address[],
+    targetStatus: SessionStatus,
     options?: { timeoutMs?: number; waitMode?: WaitMode }
-  ): Promise<Goal[]>;
-  
+  ): Promise<Session[]>;
+
   waitForTasksStatus(
     taskAddresses: Address[],
     targetStatus: TaskStatus,
@@ -173,32 +184,21 @@ export interface IMonitoringService {
  * Subscription service interface for real-time event subscriptions
  */
 export interface ISubscriptionService {
-  subscribeToGoalEvents(
+  subscribeToSessionEvents(
     networkConfig: Address,
-    goalSlotId: bigint,
-    callback: (event: import('./dacSubscriptions.js').GoalEvent) => void
+    sessionSlotId: bigint,
+    callback: (event: import('./dacSubscriptions.js').SessionEvent) => void
   ): Promise<() => void>;
-  
-  /**
-   * Subscribe to network-wide events (all events, not filtered by goal)
-   */
   subscribeToNetworkEvents(
-    callback: (event: import('./dacSubscriptions.js').GoalEvent) => void
+    callback: (event: import('./dacSubscriptions.js').SessionEvent) => void
   ): Promise<() => void>;
-  
-  /**
-   * Fetch historical events for a goal (and optionally a specific task)
-   */
   fetchHistoricalEvents(
     networkConfig: Address,
-    goalSlotId: bigint,
+    sessionSlotId: bigint,
     options?: import('./dacSubscriptions.js').FetchHistoricalEventsOptions
-  ): Promise<import('./dacSubscriptions.js').GoalEvent[]>;
-  
-  /**
-   * Fetch network-wide historical events
-   */
+  ): Promise<import('./dacSubscriptions.js').SessionEvent[]>;
   fetchNetworkHistoricalEvents(
     options?: import('./dacSubscriptions.js').FetchHistoricalEventsOptions
-  ): Promise<import('./dacSubscriptions.js').GoalEvent[]>;
+  ): Promise<import('./dacSubscriptions.js').SessionEvent[]>;
+
 }

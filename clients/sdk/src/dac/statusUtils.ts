@@ -1,4 +1,4 @@
-import { NodeStatus, AgentStatus, TaskStatus, GoalStatus } from '../generated/dac/types/index.js';
+import { NodeStatus, AgentStatus, TaskStatus, SessionStatus } from '../generated/dac/types/index.js';
 
 /**
  * Get the string name of a status enum value
@@ -19,5 +19,5 @@ export const getAgentStatusName = (status: AgentStatus): string =>
 export const getTaskStatusName = (status: TaskStatus): string => 
   getStatusName(TaskStatus, status);
 
-export const getGoalStatusName = (status: GoalStatus): string => 
-  getStatusName(GoalStatus, status);
+export const getSessionStatusName = (status: SessionStatus): string => 
+  getStatusName(SessionStatus, status);

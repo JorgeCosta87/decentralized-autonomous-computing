@@ -48,21 +48,22 @@ export async function deriveAgentAddress(
   return address(agentAddress.toBase58());
 }
 
-export async function deriveGoalAddress(
+/** Session PDA: seeds ["session", network_config, session_slot_id] */
+export async function deriveSessionAddress(
   programAddress: Address,
   networkConfig: Address,
-  goalSlotId: bigint
+  sessionSlotId: bigint
 ): Promise<Address> {
-  const slotIdBuffer = bigintToBufferLE(goalSlotId);
-  const [goalAddress] = PublicKey.findProgramAddressSync(
+  const slotIdBuffer = bigintToBufferLE(sessionSlotId);
+  const [sessionAddress] = PublicKey.findProgramAddressSync(
     [
-      new TextEncoder().encode('goal'),
+      new TextEncoder().encode('session'),
       new PublicKey(networkConfig).toBuffer(),
       slotIdBuffer,
     ],
     new PublicKey(programAddress)
   );
-  return address(goalAddress.toBase58());
+  return address(sessionAddress.toBase58());
 }
 
 export async function deriveTaskAddress(
@@ -82,29 +83,31 @@ export async function deriveTaskAddress(
   return address(taskAddress.toBase58());
 }
 
-export async function deriveGoalVaultAddress(
+/** Session vault PDA: seeds ["session_vault", session] */
+export async function deriveSessionVaultAddress(
   programAddress: Address,
-  goal: Address
+  session: Address
 ): Promise<Address> {
   const [vaultAddress] = PublicKey.findProgramAddressSync(
     [
-      new TextEncoder().encode('goal_vault'),
-      new PublicKey(goal).toBuffer(),
+      new TextEncoder().encode('session_vault'),
+      new PublicKey(session).toBuffer(),
     ],
     new PublicKey(programAddress)
   );
   return address(vaultAddress.toBase58());
 }
 
+/** Contribution PDA: seeds ["contribution", session, contributor] */
 export async function deriveContributionAddress(
   programAddress: Address,
-  goal: Address,
+  session: Address,
   contributor: Address
 ): Promise<Address> {
   const [contributionAddress] = PublicKey.findProgramAddressSync(
     [
       new TextEncoder().encode('contribution'),
-      new PublicKey(goal).toBuffer(),
+      new PublicKey(session).toBuffer(),
       new PublicKey(contributor).toBuffer(),
     ],
     new PublicKey(programAddress)

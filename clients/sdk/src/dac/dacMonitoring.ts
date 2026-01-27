@@ -2,18 +2,18 @@ import { address, type Address } from '@solana/kit';
 import {
   decodeNodeInfo,
   decodeAgent,
-  decodeGoal,
+  decodeSession,
   decodeTask,
   NODE_INFO_DISCRIMINATOR,
   AGENT_DISCRIMINATOR,
-  GOAL_DISCRIMINATOR,
+  SESSION_DISCRIMINATOR,
   TASK_DISCRIMINATOR,
   type NodeInfo,
   type Agent,
-  type Goal,
+  type Session,
   type Task,
 } from '../generated/dac/accounts/index.js';
-import type { NodeStatus, AgentStatus, GoalStatus, TaskStatus } from '../generated/dac/types/index.js';
+import type { NodeStatus, AgentStatus, SessionStatus, TaskStatus } from '../generated/dac/types/index.js';
 import type { IMonitoringService, DacServiceDeps, IQueryService } from './dacService.js';
 
 /**
@@ -273,25 +273,25 @@ export function createMonitoringService(
       );
     },
 
-    async waitForGoalsStatus(
-      goalAddresses: Address[],
-      targetStatus: GoalStatus,
+    async waitForSessionsStatus(
+      sessionAddresses: Address[],
+      targetStatus: SessionStatus,
       options?: { timeoutMs?: number; waitMode?: WaitMode }
-    ): Promise<Goal[]> {
+    ): Promise<Session[]> {
       return waitForStatus(
         deps,
         queryService,
-        goalAddresses,
+        sessionAddresses,
         targetStatus,
         options,
         {
-          getByStatus: (status) => queryService.getGoalsByStatus(status),
-          discriminator: GOAL_DISCRIMINATOR,
+          getByStatus: (status) => queryService.getSessionsByStatus(status),
+          discriminator: SESSION_DISCRIMINATOR,
           statusOffset: 8 + 8 + 32 + 32 + 32,
-          decode: decodeGoal,
-          getKey: (_goal) => '' as Address,
+          decode: decodeSession,
+          getKey: (_session) => '' as Address,
           getAccountKey: (notification) => address(notification.value.pubkey),
-          entityName: 'goal',
+          entityName: 'session',
         }
       );
     },
