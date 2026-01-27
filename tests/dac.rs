@@ -5,7 +5,7 @@ use crate::setup::test_data::{
 };
 use crate::setup::{Accounts, Instructions, TestFixture};
 use dac_client::types::{CodeMeasurement, SemanticVersion};
-use dac_client::{ActionType, AgentStatus, GoalStatus, NodeStatus, NodeType, TaskStatus};
+use dac_client::{AgentStatus, NodeStatus, NodeType, SessionStatus, TaskStatus, TaskType};
 use sha2::{Digest, Sha256};
 use solana_sdk::signature::Signer;
 use utils::Utils;
@@ -17,14 +17,12 @@ fn test_initialize_network_without_remaining_accounts() {
     let mut fixt = TestFixture::new();
     let network_config_pda = fixt.find_network_config_pda().0;
 
-    let allocate_goals = 0;
     let allocate_tasks = 0;
 
     let result = fixt.initialize_network(
         &fixt.authority.insecure_clone(),
         &network_config_pda,
         DEFAULT_CID_CONFIG.to_string(),
-        allocate_goals,
         allocate_tasks,
         DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec(),
         DEFAULT_REQUIRED_VALIDATIONS,
@@ -40,7 +38,6 @@ fn test_initialize_network_without_remaining_accounts() {
             assert_eq!(network_config.cid_config, DEFAULT_CID_CONFIG.to_string());
             assert_eq!(network_config.genesis_hash, compute_genesis_hash());
             assert_eq!(network_config.agent_count, 0);
-            assert_eq!(network_config.goal_count, allocate_goals);
             assert_eq!(network_config.task_count, allocate_tasks);
             assert_eq!(
                 network_config.approved_code_measurements,
@@ -56,19 +53,14 @@ fn test_initialize_network_with_remaining_accounts() {
     let mut fixt = TestFixture::new();
     let network_config_pda = fixt.find_network_config_pda().0;
 
-    let allocate_goals = 2;
     let allocate_tasks = 20;
-    let remaining_accounts = fixt.create_remaining_accounts_for_initialize(
-        &network_config_pda,
-        allocate_goals,
-        allocate_tasks,
-    );
+    let remaining_accounts =
+        fixt.create_remaining_accounts_for_initialize(&network_config_pda, allocate_tasks);
 
     let result = fixt.initialize_network(
         &fixt.authority.insecure_clone(),
         &network_config_pda,
         DEFAULT_CID_CONFIG.to_string(),
-        allocate_goals,
         allocate_tasks,
         DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec(),
         DEFAULT_REQUIRED_VALIDATIONS,
@@ -83,7 +75,6 @@ fn test_initialize_network_with_remaining_accounts() {
             assert_eq!(network_config.cid_config, DEFAULT_CID_CONFIG.to_string());
             assert_eq!(network_config.genesis_hash, compute_genesis_hash());
             assert_eq!(network_config.agent_count, 0);
-            assert_eq!(network_config.goal_count, allocate_goals);
             assert_eq!(network_config.task_count, allocate_tasks);
             assert_eq!(
                 network_config.approved_code_measurements,
@@ -197,7 +188,7 @@ fn test_register_public_node() {
             assert_eq!(node_info.node_type, NodeType::Public);
             assert_eq!(node_info.status, NodeStatus::PendingClaim);
             assert_eq!(node_info.node_info_cid, None);
-            assert_eq!(network_config.public_node_count, 0);
+            assert_eq!(network_config.approved_public_nodes.len(), 0);
         }
         Err(e) => panic!("Failed to register public node: {:#?}", e),
     }
@@ -226,7 +217,7 @@ fn test_register_confidential_node() {
             assert_eq!(node_info.node_type, NodeType::Confidential);
             assert_eq!(node_info.status, NodeStatus::PendingClaim);
             assert_eq!(node_info.code_measurement, None);
-            assert_eq!(network_config.confidential_node_count, 0);
+            assert_eq!(network_config.approved_confidential_nodes.len(), 0);
         }
         Err(e) => panic!("Failed to register confidential node: {:#?}", e),
     }
@@ -253,7 +244,7 @@ fn test_claim_public_node() {
                 node_info.node_info_cid,
                 Some(DEFAULT_NODE_INFO_CID.to_string())
             );
-            assert_eq!(network_config.public_node_count, 0);
+            assert_eq!(network_config.approved_public_nodes.len(), 0);
         }
         Err(e) => panic!("Failed to claim public node: {:#?}", e),
     }
@@ -282,7 +273,7 @@ fn test_claim_confidential_node() {
                 node_info.tee_signing_pubkey,
                 Some(fixt.tee_signing_keypair.pubkey())
             );
-            assert_eq!(network_config.confidential_node_count, 1);
+            assert_eq!(network_config.approved_confidential_nodes.len(), 1);
         }
         Err(e) => panic!("Failed to claim confidential node: {:#?}", e),
     }
@@ -295,10 +286,7 @@ fn test_activate_node_public() {
         .with_register_public_node()
         .with_claim_public_node();
 
-    let result = fixt.activate_node(
-        &fixt.authority.insecure_clone(),
-        &fixt.public_node.pubkey(),
-    );
+    let result = fixt.activate_node(&fixt.authority.insecure_clone(), &fixt.public_node.pubkey());
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
@@ -306,7 +294,7 @@ fn test_activate_node_public() {
             let network_config = fixt.get_network_config();
 
             assert_eq!(node_info.status, NodeStatus::Active);
-            assert_eq!(network_config.public_node_count, 1);
+            assert_eq!(network_config.approved_public_nodes.len(), 1);
         }
         Err(e) => panic!("Failed to activate public node: {:#?}", e),
     }
@@ -329,7 +317,10 @@ fn test_activate_node_confidential() {
         &fixt.authority.insecure_clone(),
         &fixt.confidential_node.pubkey(),
     );
-    assert!(result.is_err(), "Should fail to activate already active node");
+    assert!(
+        result.is_err(),
+        "Should fail to activate already active node"
+    );
 }
 
 #[test]
@@ -339,11 +330,11 @@ fn test_activate_node_invalid_status() {
         .with_register_public_node();
     // Node is in PendingClaim, not AwaitingValidation
 
-    let result = fixt.activate_node(
-        &fixt.authority.insecure_clone(),
-        &fixt.public_node.pubkey(),
+    let result = fixt.activate_node(&fixt.authority.insecure_clone(), &fixt.public_node.pubkey());
+    assert!(
+        result.is_err(),
+        "Should fail to activate node in PendingClaim status"
     );
-    assert!(result.is_err(), "Should fail to activate node in PendingClaim status");
 }
 
 #[test]
@@ -358,85 +349,61 @@ fn test_activate_node_unauthorized() {
         &fixt.public_node_owner.insecure_clone(),
         &fixt.public_node.pubkey(),
     );
-    assert!(result.is_err(), "Should fail when non-authority tries to activate");
+    assert!(
+        result.is_err(),
+        "Should fail when non-authority tries to activate"
+    );
 }
 
 #[test]
 fn test_validate_public_node() {
-    let mut fixt = TestFixture::new()
+    let fixt = TestFixture::new()
         .with_initialize_network()
         .with_register_confidential_node()
         .with_claim_confidential_node()
         .with_register_public_node()
-        .with_claim_public_node();
+        .with_claim_public_node()
+        .with_validate_public_node(true);
 
-    let result = fixt.validate_public_node(
-        &fixt.confidential_node.insecure_clone(),
-        &fixt.public_node.pubkey(),
-        true,
-    );
-    match result {
-        Ok(_) => {
-            fixt.svm.print_transaction_logs(&result.unwrap());
-            let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
-            let network_config = fixt.get_network_config();
+    let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
+    let network_config = fixt.get_network_config();
 
-            assert_eq!(node_info.status, NodeStatus::Active);
-            assert_eq!(node_info.total_tasks_completed, 0);
-            assert_eq!(node_info.total_earned, 0);
-            assert_eq!(network_config.public_node_count, 1);
-        }
-        Err(e) => panic!("Failed to validate public node: {:#?}", e),
-    }
+    assert_eq!(node_info.status, NodeStatus::Active);
+    assert_eq!(node_info.total_tasks_completed, 0);
+    assert_eq!(node_info.total_earned, 0);
+    assert_eq!(network_config.approved_public_nodes.len(), 1);
 }
 
 #[test]
 fn test_validate_public_node_not_approved() {
-    let mut fixt = TestFixture::new()
+    let fixt = TestFixture::new()
         .with_initialize_network()
         .with_register_confidential_node()
         .with_claim_confidential_node()
         .with_register_public_node()
-        .with_claim_public_node();
+        .with_claim_public_node()
+        .with_validate_public_node(false);
 
-    let result = fixt.validate_public_node(
-        &fixt.confidential_node.insecure_clone(),
-        &fixt.public_node.pubkey(),
-        false,
-    );
-    match result {
-        Ok(_) => {
-            fixt.svm.print_transaction_logs(&result.unwrap());
-            let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
-
-            assert_eq!(node_info.status, NodeStatus::Rejected);
-        }
-        Err(e) => panic!("Failed to validate public node not approved: {:#?}", e),
-    }
+    let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
+    assert_eq!(node_info.status, NodeStatus::Rejected);
 }
 
 #[test]
 fn test_confidential_node_can_validate_public_node() {
-    let mut fixt = TestFixture::new()
+    let fixt = TestFixture::new()
         .with_initialize_network()
         .with_register_confidential_node()
         .with_claim_confidential_node()
         .with_register_public_node()
-        .with_claim_public_node();
-
-    let result = fixt.validate_public_node(
-        &fixt.confidential_node.insecure_clone(),
-        &fixt.public_node.pubkey(),
-        true,
-    );
-
-    assert!(
-        result.is_ok(),
-        "Confidential nodes should be able to validate public nodes (TEE-verified and trusted)"
-    );
+        .with_claim_public_node()
+        .with_validate_public_node(true);
 
     let node_info = fixt.get_node_info(&fixt.public_node.pubkey());
-    assert_eq!(node_info.status, dac_client::NodeStatus::Active);
+    assert_eq!(
+        node_info.status,
+        dac_client::NodeStatus::Active,
+        "Confidential nodes should be able to validate public nodes (TEE-verified and trusted)"
+    );
 }
 
 #[test]
@@ -534,215 +501,163 @@ fn test_create_multiple_agents() {
 }
 
 #[test]
-fn test_set_goal() {
-    let mut fixt = TestFixture::new()
+fn test_set_session() {
+    let fixt = TestFixture::new()
         .with_initialize_network()
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node()
+        .with_validate_public_node(true)
         .with_create_agent()
-        .with_validated_agent(0);
+        .with_validated_agent(0)
+        .with_create_session(false)
+        .with_set_session_using_public_compute(0, 0, TaskType::Completion(0));
 
-    let goal_owner = fixt.create_keypair();
     let network_config_pda = fixt.find_network_config_pda().0;
-
-    let result1 = fixt.create_goal(&goal_owner, true, false);
-    assert!(result1.is_ok(), "Failed to create goal");
-
-    let goal = fixt.get_goal(&network_config_pda, 0);
+    let session = fixt.get_session(&network_config_pda, 0);
+    let (session_pda, _) = fixt.find_session_pda(&network_config_pda, 0);
+    let owner_contribution = fixt.get_contribution(&session_pda, &fixt.agent_owner.pubkey());
     let network_config = fixt.get_network_config();
     let mut task_slot_id = 0;
-
     for i in 0..network_config.task_count {
         let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
-        if task_pda == goal.task {
+        if task_pda == session.task {
             task_slot_id = i;
             break;
         }
     }
+    let (task_pda, _) = fixt.find_task_pda(&network_config_pda, task_slot_id);
+    let task = fixt.get_task(&network_config_pda, task_slot_id);
 
-    let result2 = fixt.set_goal(
-        &goal_owner,
-        0,
-        DEFAULT_GOAL_SPECIFICATION_CID.to_string(),
-        10,
-        0,
-        task_slot_id,
-        DEFAULT_INITIAL_DEPOSIT,
+    assert_eq!(session.owner, fixt.agent_owner.pubkey());
+    assert_eq!(
+        session.specification_cid,
+        DEFAULT_GOAL_SPECIFICATION_CID.to_string()
     );
+    assert_eq!(session.max_iterations, 10);
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(session.total_shares, DEFAULT_INITIAL_DEPOSIT);
+    assert_eq!(session.task, task_pda);
 
-    match result2 {
-        Ok(_) => {
-            fixt.svm.print_transaction_logs(&result2.unwrap());
-            let goal = fixt.get_goal(&network_config_pda, 0);
-            let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
-            let owner_contribution = fixt.get_contribution(&goal_pda, &goal_owner.pubkey());
-            let network_config = fixt.get_network_config();
-            let mut task_slot_id = 0;
-            for i in 0..network_config.task_count {
-                let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
-                if task_pda == goal.task {
-                    task_slot_id = i;
-                    break;
-                }
-            }
-            let (task_pda, _) = fixt.find_task_pda(&network_config_pda, task_slot_id);
-            let task = fixt.get_task(&network_config_pda, task_slot_id);
-            let (agent_pda, _) = fixt.find_agent_pda(&network_config_pda, 0);
+    assert_eq!(owner_contribution.session, session_pda);
+    assert_eq!(owner_contribution.contributor, fixt.agent_owner.pubkey());
+    assert_eq!(owner_contribution.shares, DEFAULT_INITIAL_DEPOSIT);
+    assert_eq!(owner_contribution.refund_amount, 0);
 
-            assert_eq!(goal.owner, goal_owner.pubkey());
-            assert_eq!(goal.agent, agent_pda);
-            assert_eq!(
-                goal.specification_cid,
-                DEFAULT_GOAL_SPECIFICATION_CID.to_string()
-            );
-            assert_eq!(goal.max_iterations, 10);
-            assert_eq!(goal.status, GoalStatus::Active);
-            assert_eq!(goal.total_shares, DEFAULT_INITIAL_DEPOSIT);
-            assert_eq!(goal.task, task_pda);
-
-            assert_eq!(owner_contribution.goal, goal_pda);
-            assert_eq!(owner_contribution.contributor, goal_owner.pubkey());
-            assert_eq!(owner_contribution.shares, DEFAULT_INITIAL_DEPOSIT);
-            assert_eq!(owner_contribution.refund_amount, 0);
-
-            assert_eq!(task.status, TaskStatus::Pending);
-            assert_eq!(task.action_type, ActionType::Llm);
-        }
-        Err(e) => panic!("Failed to set goal: {:#?}", e),
-    }
+    assert_eq!(task.status, TaskStatus::Pending);
+    assert_eq!(task.task_type, TaskType::Completion(0));
 }
 
 #[test]
-fn test_contribute_to_goal() {
+fn test_contribute_to_session() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node()
+        .with_validate_public_node(true)
         .with_create_agent()
-        .with_validated_agent(0);
+        .with_validated_agent(0)
+        .with_create_session(false)
+        .with_set_session_using_public_compute(0, 0, TaskType::Completion(0));
 
     let contributor = fixt.create_keypair();
     let network_config_pda = fixt.find_network_config_pda().0;
+    let result = fixt.contribute_to_session(&contributor, 0, DEFAULT_CONTRIBUTION_AMOUNT);
 
-    let mut fixt = fixt.with_set_goal(0, 0);
+    assert!(result.is_ok(), "Failed to contribute: {:#?}", result.err());
+    let session = fixt.get_session(&network_config_pda, 0);
+    let (session_pda, _) = fixt.find_session_pda(&network_config_pda, 0);
+    let contribution = fixt.get_contribution(&session_pda, &contributor.pubkey());
 
-    let result = fixt.contribute_to_goal(&contributor, 0, DEFAULT_CONTRIBUTION_AMOUNT);
-
-    match result {
-        Ok(_) => {
-            fixt.svm.print_transaction_logs(&result.unwrap());
-            let goal = fixt.get_goal(&network_config_pda, 0);
-            let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
-            let contribution = fixt.get_contribution(&goal_pda, &contributor.pubkey());
-
-            assert_eq!(contribution.goal, goal_pda);
-            assert_eq!(contribution.contributor, contributor.pubkey());
-            assert!(contribution.shares > 0, "Contributor should have shares");
-            assert_eq!(contribution.refund_amount, 0);
-
-            assert!(
-                goal.total_shares > DEFAULT_INITIAL_DEPOSIT,
-                "Total shares should include contributor's shares"
-            );
-        }
-        Err(e) => panic!("Failed to contribute to goal: {:#?}", e),
-    }
+    assert_eq!(contribution.session, session_pda);
+    assert_eq!(contribution.contributor, contributor.pubkey());
+    assert!(contribution.shares > 0, "Contributor should have shares");
+    assert_eq!(contribution.refund_amount, 0);
+    assert!(
+        session.total_shares > DEFAULT_INITIAL_DEPOSIT,
+        "Total shares should include contributor's shares"
+    );
 }
 
 #[test]
-fn test_contribute_to_goal_multiple_contributors() {
+fn test_contribute_to_session_multiple_contributors() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node()
+        .with_validate_public_node(true)
         .with_create_agent()
-        .with_validated_agent(0);
+        .with_validated_agent(0)
+        .with_create_session(false)
+        .with_set_session_using_public_compute(0, 0, TaskType::Completion(0));
 
-    let goal_owner = fixt.create_keypair();
     let contributor1 = fixt.create_keypair();
     let contributor2 = fixt.create_keypair();
     let network_config_pda = fixt.find_network_config_pda().0;
 
-    let result = fixt.set_goal(
-        &goal_owner,
-        0,
-        DEFAULT_GOAL_SPECIFICATION_CID.to_string(),
-        10,
-        0,
-        0,
-        DEFAULT_INITIAL_DEPOSIT,
-    );
-    assert!(result.is_ok(), "Failed to set goal: {:#?}", result.err());
-
-    // First contribution
-    let result1 = fixt.contribute_to_goal(&contributor1, 0, DEFAULT_CONTRIBUTION_AMOUNT);
+    let result1 = fixt.contribute_to_session(&contributor1, 0, DEFAULT_CONTRIBUTION_AMOUNT);
     assert!(result1.is_ok(), "Failed first contribution");
-
-    // Second contribution
-    let result2 = fixt.contribute_to_goal(&contributor2, 0, DEFAULT_CONTRIBUTION_AMOUNT);
+    let result2 = fixt.contribute_to_session(&contributor2, 0, DEFAULT_CONTRIBUTION_AMOUNT);
     assert!(result2.is_ok(), "Failed second contribution");
 
-    let goal = fixt.get_goal(&network_config_pda, 0);
-    let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
-    let contribution1 = fixt.get_contribution(&goal_pda, &contributor1.pubkey());
-    let contribution2 = fixt.get_contribution(&goal_pda, &contributor2.pubkey());
+    let session = fixt.get_session(&network_config_pda, 0);
+    let (session_pda, _) = fixt.find_session_pda(&network_config_pda, 0);
+    let contribution1 = fixt.get_contribution(&session_pda, &contributor1.pubkey());
+    let contribution2 = fixt.get_contribution(&session_pda, &contributor2.pubkey());
 
     assert!(contribution1.shares > 0, "Contributor1 should have shares");
     assert!(contribution2.shares > 0, "Contributor2 should have shares");
-
-    println!("Total shares: {}", goal.total_shares);
-    println!("Contribution1 shares: {}", contribution1.shares);
-    println!("Contribution2 shares: {}", contribution2.shares);
-    println!("Initial deposit: {}", DEFAULT_INITIAL_DEPOSIT);
-    println!("Contribution amount: {}", DEFAULT_CONTRIBUTION_AMOUNT);
-    println!("Total contributions: {}", DEFAULT_CONTRIBUTION_AMOUNT * 2);
-    println!(
-        "Total shares should be sum of all contributions: {}",
-        DEFAULT_INITIAL_DEPOSIT + DEFAULT_CONTRIBUTION_AMOUNT * 2
-    );
-
     assert!(
-        goal.total_shares >= DEFAULT_INITIAL_DEPOSIT + DEFAULT_CONTRIBUTION_AMOUNT * 2,
+        session.total_shares >= DEFAULT_INITIAL_DEPOSIT + DEFAULT_CONTRIBUTION_AMOUNT * 2,
         "Total shares should include all contributions"
     );
 }
 
 #[test]
-fn test_withdraw_from_goal() {
+fn test_withdraw_from_session() {
     let mut fixt = TestFixture::new()
         .with_initialize_network()
+        .with_register_confidential_node()
+        .with_claim_confidential_node()
+        .with_register_public_node()
+        .with_claim_public_node()
+        .with_validate_public_node(true)
         .with_create_agent()
         .with_validated_agent(0)
-        .with_set_goal(0, 0)
-        .with_contribute_to_goal(0, DEFAULT_CONTRIBUTION_AMOUNT);
+        .with_create_session(false)
+        .with_set_session_using_public_compute(0, 0, TaskType::Completion(0))
+        .with_contribute_to_session(0, DEFAULT_CONTRIBUTION_AMOUNT);
 
     let contributor = fixt.contributor.insecure_clone();
     let network_config_pda = fixt.find_network_config_pda().0;
-
-    let (goal_pda, _) = fixt.find_goal_pda(&network_config_pda, 0);
-    let contribution_before = fixt.get_contribution(&goal_pda, &contributor.pubkey());
-    let goal_before = fixt.get_goal(&network_config_pda, 0);
+    let (session_pda, _) = fixt.find_session_pda(&network_config_pda, 0);
+    let contribution_before = fixt.get_contribution(&session_pda, &contributor.pubkey());
+    let session_before = fixt.get_session(&network_config_pda, 0);
     let shares_to_burn = contribution_before.shares / 2;
 
-    let result = fixt.withdraw_from_goal(&contributor, 0, shares_to_burn);
+    let result = fixt.withdraw_from_session(&contributor, 0, shares_to_burn);
+    assert!(result.is_ok(), "Failed to withdraw: {:#?}", result.err());
 
-    match result {
-        Ok(_) => {
-            fixt.svm.print_transaction_logs(&result.unwrap());
-            let goal_after = fixt.get_goal(&network_config_pda, 0);
-            let contribution_after = fixt.get_contribution(&goal_pda, &contributor.pubkey());
+    let session_after = fixt.get_session(&network_config_pda, 0);
+    let contribution_after = fixt.get_contribution(&session_pda, &contributor.pubkey());
 
-            assert_eq!(
-                contribution_after.shares,
-                contribution_before.shares - shares_to_burn,
-                "Contribution shares should decrease"
-            );
-
-            assert_eq!(
-                goal_after.total_shares,
-                goal_before.total_shares - shares_to_burn,
-                "Goal total shares should decrease"
-            );
-
-            assert_eq!(contribution_after.goal, goal_pda);
-            assert_eq!(contribution_after.contributor, contributor.pubkey());
-        }
-        Err(e) => panic!("Failed to withdraw from goal: {:#?}", e),
-    }
+    assert_eq!(
+        contribution_after.shares,
+        contribution_before.shares - shares_to_burn,
+        "Contribution shares should decrease"
+    );
+    assert_eq!(
+        session_after.total_shares,
+        session_before.total_shares - shares_to_burn,
+        "Session total shares should decrease"
+    );
+    assert_eq!(contribution_after.session, session_pda);
+    assert_eq!(contribution_after.contributor, contributor.pubkey());
 }
 
 #[test]
@@ -752,56 +667,53 @@ fn test_claim_task() {
         .with_register_confidential_node()
         .with_claim_confidential_node()
         .with_register_public_node()
-        .with_claim_public_node();
-
-    let result = fixt.validate_public_node(
-        &fixt.confidential_node.insecure_clone(),
-        &fixt.public_node.pubkey(),
-        true,
-    );
-    assert!(result.is_ok(), "Failed to validate public node");
-
-    let mut fixt = fixt
+        .with_claim_public_node()
+        .with_register_validator_node()
+        .with_claim_validator_node()
+        .with_validate_public_node(true)
+        .with_validate_validator_node(true)
         .with_create_agent()
         .with_validated_agent(0)
-        .with_create_goal(false)
-        .with_set_goal(0, 0);
+        .with_create_session(false)
+        .with_set_session_using_public_compute(0, 0, TaskType::Completion(0));
 
-    let goal_slot_id = 0;
+    let session_slot_id = 0;
     let network_config_pda = fixt.find_network_config_pda().0;
     // Get the task that was created with the goal
-    let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+    let session = fixt.get_session(&network_config_pda, session_slot_id);
     let network_config = fixt.get_network_config();
     let mut task_slot_id = 0;
     // Find which task slot corresponds to the goal's task
     for i in 0..network_config.task_count {
         let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
-        if task_pda == goal.task {
+        if task_pda == session.task {
             task_slot_id = i;
             break;
         }
     }
     let max_task_cost = 1_000_000_000;
+    let max_call_count = 10u64;
 
     let result = fixt.claim_task(
         &fixt.public_node.insecure_clone(),
-        goal_slot_id,
+        session_slot_id,
         task_slot_id,
         max_task_cost,
+        max_call_count,
     );
 
     match result {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
             let network_config_pda = fixt.find_network_config_pda().0;
-            let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+            let session = fixt.get_session(&network_config_pda, session_slot_id);
             let task = fixt.get_task(&network_config_pda, task_slot_id);
 
             assert_eq!(task.status, TaskStatus::Processing);
             assert_eq!(task.compute_node, Some(fixt.public_node.pubkey()));
             assert_eq!(task.max_task_cost, max_task_cost);
-            assert_eq!(task.execution_count, 1);
-            assert_eq!(goal.locked_for_tasks, max_task_cost);
+            assert_eq!(task.task_index, 1);
+            assert_eq!(session.locked_for_tasks, max_task_cost);
         }
         Err(e) => panic!("Failed to claim task: {:#?}", e),
     }
@@ -814,53 +726,55 @@ fn test_submit_task_result() {
         .with_register_confidential_node()
         .with_claim_confidential_node()
         .with_register_public_node()
-        .with_claim_public_node();
-
-    let result = fixt.validate_public_node(
-        &fixt.confidential_node.insecure_clone(),
-        &fixt.public_node.pubkey(),
-        true,
-    );
-    assert!(result.is_ok(), "Failed to validate public node");
-
-    let mut fixt = fixt
+        .with_claim_public_node()
+        .with_register_validator_node()
+        .with_claim_validator_node()
+        .with_validate_public_node(true)
+        .with_validate_validator_node(true)
         .with_create_agent()
         .with_validated_agent(0)
-        .with_create_goal(false)
-        .with_set_goal(0, 0);
+        .with_create_session(false)
+        .with_set_session_using_public_compute(0, 0, TaskType::Completion(0));
 
-    let goal_slot_id = 0;
+    let session_slot_id = 0;
     let network_config_pda = fixt.find_network_config_pda().0;
     // Get the task that was created with the goal
-    let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+    let session = fixt.get_session(&network_config_pda, session_slot_id);
     let network_config = fixt.get_network_config();
     let mut task_slot_id = 0;
     // Find which task slot corresponds to the goal's task
     for i in 0..network_config.task_count {
         let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
-        if task_pda == goal.task {
+        if task_pda == session.task {
             task_slot_id = i;
             break;
         }
     }
     let max_task_cost = 1_000_000_000;
+    let max_call_count = 10u64;
 
     let result = fixt.claim_task(
         &fixt.public_node.insecure_clone(),
-        goal_slot_id,
+        session_slot_id,
         task_slot_id,
         max_task_cost,
+        max_call_count,
     );
     assert!(result.is_ok(), "Failed to claim task");
 
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
+    let state_cid = Some("QmTestState123456789".to_string());
+    let call_count = 1u64;
 
     let result = fixt.submit_task_result(
         &fixt.public_node.insecure_clone(),
+        session_slot_id,
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
+        state_cid.clone(),
+        call_count,
     );
 
     match result {
@@ -884,47 +798,60 @@ fn test_submit_public_task_validation_approved() {
         .with_register_confidential_node()
         .with_claim_confidential_node()
         .with_register_public_node()
-        .with_claim_public_node();
-
-    let result = fixt.validate_public_node(
-        &fixt.confidential_node.insecure_clone(),
-        &fixt.public_node.pubkey(),
-        true,
-    );
-    assert!(result.is_ok(), "Failed to validate public node");
-
-    let mut fixt = fixt
+        .with_claim_public_node()
+        .with_register_validator_node()
+        .with_claim_validator_node()
+        .with_validate_public_node(true)
+        .with_validate_validator_node(true)
         .with_create_agent()
         .with_validated_agent(0)
-        .with_create_goal(false)
-        .with_set_goal(0, 0);
+        .with_create_session(false)
+        .with_set_session_using_public_compute(0, 0, TaskType::Completion(0));
 
-    let goal_slot_id = 0;
-    let task_slot_id = 0;
+    let session_slot_id = 0;
+    let network_config_pda = fixt.find_network_config_pda().0;
+    let session = fixt.get_session(&network_config_pda, session_slot_id);
+    let network_config = fixt.get_network_config();
+    let mut task_slot_id = 0;
+    for i in 0..network_config.task_count {
+        let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
+        if task_pda == session.task {
+            task_slot_id = i;
+            break;
+        }
+    }
     let max_task_cost = 1_000_000_000;
+    let max_call_count = 10u64;
     let payment_amount = 500_000_000;
 
     let result = fixt.claim_task(
         &fixt.public_node.insecure_clone(),
-        goal_slot_id,
+        session_slot_id,
         task_slot_id,
         max_task_cost,
+        max_call_count,
     );
     assert!(result.is_ok(), "Failed to claim task");
 
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
+    let state_cid = Some("QmTestState123456789".to_string());
+    let call_count = 1u64;
     let result = fixt.submit_task_result(
         &fixt.public_node.insecure_clone(),
+        session_slot_id,
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
+        state_cid.clone(),
+        call_count,
     );
     assert!(result.is_ok(), "Failed to submit task result");
 
+    // Assigned validator is validator_node (compute is public_node)
     let result = fixt.submit_public_task_validation(
-        &fixt.confidential_node.insecure_clone(),
-        goal_slot_id,
+        &fixt.validator_node.insecure_clone(),
+        session_slot_id,
         task_slot_id,
         &fixt.public_node.pubkey(),
         payment_amount,
@@ -936,7 +863,7 @@ fn test_submit_public_task_validation_approved() {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
             let network_config_pda = fixt.find_network_config_pda().0;
-            let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+            let session = fixt.get_session(&network_config_pda, session_slot_id);
             let task = fixt.get_task(&network_config_pda, task_slot_id);
             let compute_node_info = fixt.get_node_info(&fixt.public_node.pubkey());
             let (compute_node_info_pda, _) = fixt.find_node_info_pda(&fixt.public_node.pubkey());
@@ -946,8 +873,8 @@ fn test_submit_public_task_validation_approved() {
             assert_eq!(task.output_cid, Some(output_cid));
             assert_eq!(task.pending_input_cid, None);
             assert_eq!(task.pending_output_cid, None);
-            assert_eq!(goal.locked_for_tasks, 0);
-            assert_eq!(goal.current_iteration, 1);
+            assert_eq!(session.locked_for_tasks, 0);
+            assert_eq!(session.current_iteration, 1);
             assert_eq!(compute_node_info.total_tasks_completed, 1);
             assert_eq!(compute_node_info.total_earned, payment_amount);
 
@@ -967,7 +894,7 @@ fn test_submit_public_task_validation_approved() {
 
 #[test]
 fn test_submit_confidential_task_validation_approved() {
-    let fixt = TestFixture::new()
+    let mut fixt = TestFixture::new()
         .with_initialize_network()
         .with_register_confidential_node()
         .with_claim_confidential_node()
@@ -975,43 +902,70 @@ fn test_submit_confidential_task_validation_approved() {
         .with_claim_public_node()
         .with_create_agent()
         .with_validated_agent(0)
-        .with_create_goal(true);
+        .with_create_session(true);
+
+    // Second confidential node for 1 compute + 1 validator
+    let second_conf_owner = fixt.create_keypair();
+    let second_conf = fixt.create_keypair();
+    let second_tee = fixt.create_keypair();
+    let result = fixt.register_node(
+        &second_conf_owner,
+        &second_conf.pubkey(),
+        NodeType::Confidential,
+    );
+    assert!(
+        result.is_ok(),
+        "Failed to register second confidential node"
+    );
+    let result = fixt.claim_confidential_node(
+        &second_conf,
+        crate::setup::test_data::DEFAULT_CODE_MEASUREMENT,
+        second_tee.pubkey(),
+    );
+    assert!(result.is_ok(), "Failed to claim second confidential node");
 
     let network_config = fixt.get_network_config();
-    let goal_slot_id = network_config.goal_count - 1;
-
-    let mut fixt = fixt.with_set_goal(goal_slot_id, 0);
+    let session_slot_id = network_config.session_count - 1;
+    let compute_node = fixt.confidential_node.pubkey();
+    let mut fixt = fixt.with_set_session(session_slot_id, 0, compute_node, TaskType::Completion(0));
     // Get the task that was created with the goal
     let network_config_pda = fixt.find_network_config_pda().0;
-    let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+    let session = fixt.get_session(&network_config_pda, session_slot_id);
     let network_config = fixt.get_network_config();
     let mut task_slot_id = 0;
     // Find which task slot corresponds to the goal's task
     for i in 0..network_config.task_count {
         let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
-        if task_pda == goal.task {
+        if task_pda == session.task {
             task_slot_id = i;
             break;
         }
     }
     let max_task_cost = 1_000_000_000;
+    let max_call_count = 10u64;
     let payment_amount = 500_000_000;
 
     let result = fixt.claim_task(
         &fixt.confidential_node.insecure_clone(),
-        goal_slot_id,
+        session_slot_id,
         task_slot_id,
         max_task_cost,
+        max_call_count,
     );
     assert!(result.is_ok(), "Failed to claim task");
 
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
+    let state_cid = Some("QmTestState123456789".to_string());
+    let call_count = 1u64;
     let result = fixt.submit_task_result(
         &fixt.confidential_node.insecure_clone(),
+        session_slot_id,
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
+        state_cid.clone(),
+        call_count,
     );
     assert!(result.is_ok(), "Failed to submit task result");
 
@@ -1020,19 +974,20 @@ fn test_submit_confidential_task_validation_approved() {
     hasher.update(output_cid.as_bytes());
     let validation_proof: [u8; 32] = hasher.finalize().into();
 
+    // Assigned validator is second_conf (compute is fixt.confidential_node, pool minus compute = [second_conf])
     let ed25519_ix = crate::setup::Helpers::create_ed25519_instruction_to_submit_task_validation(
-        goal_slot_id,
+        session_slot_id,
         task_slot_id,
         payment_amount,
         validation_proof,
         true,
         false,
-        &fixt.tee_signing_keypair.insecure_clone(),
+        &second_tee.insecure_clone(),
     );
 
     let result = fixt.submit_confidential_task_validation(
-        &fixt.confidential_node.insecure_clone(),
-        goal_slot_id,
+        &second_conf.insecure_clone(),
+        session_slot_id,
         task_slot_id,
         &fixt.confidential_node.pubkey(),
         &ed25519_ix,
@@ -1042,7 +997,7 @@ fn test_submit_confidential_task_validation_approved() {
         Ok(_) => {
             fixt.svm.print_transaction_logs(&result.unwrap());
             let network_config_pda = fixt.find_network_config_pda().0;
-            let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
+            let session = fixt.get_session(&network_config_pda, session_slot_id);
             let task = fixt.get_task(&network_config_pda, task_slot_id);
             let (compute_node_info_pda, _) =
                 fixt.find_node_info_pda(&fixt.confidential_node.pubkey());
@@ -1050,10 +1005,14 @@ fn test_submit_confidential_task_validation_approved() {
             assert_eq!(task.status, TaskStatus::Pending);
             assert_eq!(task.input_cid, Some(input_cid));
             assert_eq!(task.output_cid, Some(output_cid));
+            assert_eq!(task.call_count, call_count);
             assert_eq!(task.pending_input_cid, None);
             assert_eq!(task.pending_output_cid, None);
-            assert_eq!(goal.locked_for_tasks, 0);
-            assert_eq!(goal.current_iteration, 1);
+
+            // Check goal state_cid
+            assert_eq!(session.state_cid, state_cid);
+            assert_eq!(session.locked_for_tasks, 0);
+            assert_eq!(session.current_iteration, 1);
 
             let (node_treasury_pda, _) = fixt.find_node_treasury_pda(&compute_node_info_pda);
             let node_treasury_lamports = fixt.svm.get_lamports(&node_treasury_pda);
@@ -1078,43 +1037,71 @@ fn test_confidential_task_validation_wrong_tee_signing_pubkey() {
         .with_create_agent()
         .with_validated_agent(0);
 
+    // Second confidential node for 1 compute + 1 validator
+    let second_conf_owner = fixt.create_keypair();
+    let second_conf = fixt.create_keypair();
+    let second_tee = fixt.create_keypair();
+    let result = fixt.register_node(
+        &second_conf_owner,
+        &second_conf.pubkey(),
+        NodeType::Confidential,
+    );
+    assert!(
+        result.is_ok(),
+        "Failed to register second confidential node"
+    );
+    let result = fixt.claim_confidential_node(
+        &second_conf,
+        crate::setup::test_data::DEFAULT_CODE_MEASUREMENT,
+        second_tee.pubkey(),
+    );
+    assert!(result.is_ok(), "Failed to claim second confidential node");
+
     let goal_owner = fixt.create_keypair();
-    let result = fixt.create_goal(&goal_owner, false, true); // is_confidential=true
+    let result = fixt.create_session(&goal_owner, false, true); // is_confidential=true
     assert!(result.is_ok(), "Failed to create confidential goal");
 
-    let mut fixt = fixt.with_set_goal(0, 0);
-
-    let goal_slot_id = 0;
-    let network_config_pda = fixt.find_network_config_pda().0;
-    let goal = fixt.get_goal(&network_config_pda, goal_slot_id);
     let network_config = fixt.get_network_config();
-    
+    let session_slot_id = network_config.session_count - 1;
+    let compute_node = fixt.confidential_node.pubkey();
+    let mut fixt = fixt.with_set_session(session_slot_id, 0, compute_node, TaskType::Completion(0));
+    let network_config_pda = fixt.find_network_config_pda().0;
+    let session = fixt.get_session(&network_config_pda, session_slot_id);
+    let network_config = fixt.get_network_config();
+
     let mut task_slot_id = 0;
     for i in 0..network_config.task_count {
         let (task_pda, _) = fixt.find_task_pda(&network_config_pda, i);
-        if task_pda == goal.task {
+        if task_pda == session.task {
             task_slot_id = i;
             break;
         }
     }
     let max_task_cost = 1_000_000_000;
+    let max_call_count = 10u64;
     let payment_amount = 500_000_000;
 
     let result = fixt.claim_task(
         &fixt.confidential_node.insecure_clone(),
-        goal_slot_id,
+        session_slot_id,
         task_slot_id,
         max_task_cost,
+        max_call_count,
     );
     assert!(result.is_ok(), "Failed to claim task");
 
     let input_cid = "QmTestInput123456789".to_string();
     let output_cid = "QmTestOutput123456789".to_string();
+    let state_cid = Some("QmTestState123456789".to_string());
+    let call_count = 1u64;
     let result = fixt.submit_task_result(
         &fixt.confidential_node.insecure_clone(),
+        session_slot_id,
         task_slot_id,
         input_cid.clone(),
         output_cid.clone(),
+        state_cid.clone(),
+        call_count,
     );
     assert!(result.is_ok(), "Failed to submit task result");
 
@@ -1125,7 +1112,7 @@ fn test_confidential_task_validation_wrong_tee_signing_pubkey() {
 
     let attacker_tee_keypair = fixt.create_keypair();
     let ed25519_ix = crate::setup::Helpers::create_ed25519_instruction_to_submit_task_validation(
-        goal_slot_id,
+        session_slot_id,
         task_slot_id,
         payment_amount,
         validation_proof,
@@ -1136,7 +1123,7 @@ fn test_confidential_task_validation_wrong_tee_signing_pubkey() {
 
     let result = fixt.submit_confidential_task_validation(
         &fixt.confidential_node.insecure_clone(),
-        goal_slot_id,
+        session_slot_id,
         task_slot_id,
         &fixt.confidential_node.pubkey(),
         &ed25519_ix,

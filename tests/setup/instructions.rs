@@ -1,10 +1,11 @@
 use dac_client::instructions::{
     ActivateNodeBuilder, ClaimConfidentialNodeBuilder, ClaimPublicNodeBuilder, ClaimTaskBuilder,
-    ContributeToGoalBuilder, CreateAgentBuilder, CreateGoalBuilder, InitializeNetworkBuilder,
-    RegisterNodeBuilder, SetGoalBuilder, SubmitConfidentialTaskValidationBuilder,
+    ContributeToSessionBuilder, CreateAgentBuilder, CreateSessionBuilder, InitializeNetworkBuilder,
+    RegisterNodeBuilder, SetSessionBuilder, SubmitConfidentialTaskValidationBuilder,
     SubmitPublicTaskValidationBuilder, SubmitTaskResultBuilder, UpdateNetworkConfigBuilder,
-    ValidateAgentBuilder, ValidatePublicNodeBuilder, WithdrawFromGoalBuilder,
+    ValidateAgentBuilder, ValidatePublicNodeBuilder, WithdrawFromSessionBuilder,
 };
+use dac_client::types::TaskType;
 use dac_client::types::{CodeMeasurement, NodeType};
 use litesvm::types::TransactionResult;
 use solana_sdk::message::Instruction;
@@ -24,7 +25,6 @@ pub trait Instructions {
         authority: &Keypair,
         network_config: &Pubkey,
         cid_config: String,
-        allocate_goals: u64,
         allocate_tasks: u64,
         approved_code_measurements: Vec<CodeMeasurement>,
         required_validations: u32,
@@ -57,11 +57,7 @@ pub trait Instructions {
         approved: bool,
     ) -> TransactionResult;
 
-    fn activate_node(
-        &mut self,
-        authority: &Keypair,
-        node_pubkey: &Pubkey,
-    ) -> TransactionResult;
+    fn activate_node(&mut self, authority: &Keypair, node_pubkey: &Pubkey) -> TransactionResult;
 
     fn validate_agent(
         &mut self,
@@ -75,58 +71,64 @@ pub trait Instructions {
         agent_config_cid: String,
     ) -> TransactionResult;
 
-    fn create_goal(
+    fn create_session(
         &mut self,
         payer: &Keypair,
-        is_public: bool,
+        is_owned: bool,
         is_confidential: bool,
     ) -> TransactionResult;
 
-    fn set_goal(
+    fn set_session(
         &mut self,
-        goal_owner: &Keypair,
-        goal_slot_id: u64,
+        session_owner: &Keypair,
+        session_slot_id: u64,
         specification_cid: String,
         max_iterations: u64,
         agent_slot_id: u64,
         task_slot_id: u64,
         initial_deposit: u64,
+        compute_node: Pubkey,
+        task_type: TaskType,
     ) -> TransactionResult;
 
-    fn contribute_to_goal(
+    fn contribute_to_session(
         &mut self,
         contributor: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         deposit_amount: u64,
     ) -> TransactionResult;
 
-    fn withdraw_from_goal(
+    fn withdraw_from_session(
         &mut self,
         contributor: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         shares_to_burn: u64,
     ) -> TransactionResult;
 
     fn claim_task(
         &mut self,
         compute_node: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         task_slot_id: u64,
         max_task_cost: u64,
+        max_call_count: u64,
     ) -> TransactionResult;
 
     fn submit_task_result(
         &mut self,
         compute_node: &Keypair,
+        session_slot_id: u64,
         task_slot_id: u64,
         input_cid: String,
         output_cid: String,
+        state_cid: Option<String>,
+        call_count: u64,
     ) -> TransactionResult;
 
     fn submit_confidential_task_validation(
         &mut self,
         node_validating: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         task_slot_id: u64,
         compute_node_pubkey: &Pubkey,
         ed25519_ix: &Instruction,
@@ -135,12 +137,12 @@ pub trait Instructions {
     fn submit_public_task_validation(
         &mut self,
         node_validating: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         task_slot_id: u64,
         compute_node_pubkey: &Pubkey,
         payment_amount: u64,
         approved: bool,
-        goal_completed: bool,
+        session_completed: bool,
     ) -> TransactionResult;
 
     fn update_network_config(
@@ -157,7 +159,6 @@ impl Instructions for TestFixture {
         authority: &Keypair,
         network_config: &Pubkey,
         cid_config: String,
-        allocate_goals: u64,
         allocate_tasks: u64,
         approved_code_measurements: Vec<CodeMeasurement>,
         required_validations: u32,
@@ -170,7 +171,6 @@ impl Instructions for TestFixture {
             .authority(authority_pubkey)
             .network_config(*network_config)
             .cid_config(cid_config)
-            .allocate_goals(allocate_goals)
             .allocate_tasks(allocate_tasks)
             .approved_code_measurements(approved_code_measurements)
             .required_validations(required_validations);
@@ -299,11 +299,7 @@ impl Instructions for TestFixture {
             .send_tx(&[builder.instruction()], &node_pubkey, &[node])
     }
 
-    fn activate_node(
-        &mut self,
-        authority: &Keypair,
-        node_pubkey: &Pubkey,
-    ) -> TransactionResult {
+    fn activate_node(&mut self, authority: &Keypair, node_pubkey: &Pubkey) -> TransactionResult {
         let authority_pubkey = authority.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
         let (node_info_pda, _) = self.find_node_info_pda(node_pubkey);
@@ -343,7 +339,7 @@ impl Instructions for TestFixture {
         )
     }
 
-    fn create_goal(
+    fn create_session(
         &mut self,
         owner: &Keypair,
         is_owned: bool,
@@ -352,17 +348,17 @@ impl Instructions for TestFixture {
         let owner_pubkey = owner.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
         let network_config = self.get_network_config();
-        let goal_slot_id = network_config.goal_count;
+        let session_slot_id = network_config.session_count;
         let task_slot_id = network_config.task_count;
-        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+        let (session_pda, _) = self.find_session_pda(&network_config_pda, session_slot_id);
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
 
-        let mut builder = CreateGoalBuilder::new();
+        let mut builder = CreateSessionBuilder::new();
         builder
             .payer(owner_pubkey)
             .owner(owner_pubkey)
             .network_config(network_config_pda)
-            .goal(goal_pda)
+            .session(session_pda)
             .task(task_pda)
             .is_owned(is_owned)
             .is_confidential(is_confidential);
@@ -371,28 +367,31 @@ impl Instructions for TestFixture {
             .send_tx(&[builder.instruction()], &owner_pubkey, &[owner])
     }
 
-    fn set_goal(
+    fn set_session(
         &mut self,
-        goal_owner: &Keypair,
-        goal_slot_id: u64,
+        session_owner: &Keypair,
+        session_slot_id: u64,
         specification_cid: String,
         max_iterations: u64,
         agent_slot_id: u64,
         task_slot_id: u64,
         initial_deposit: u64,
+        compute_node: Pubkey,
+        task_type: TaskType,
     ) -> TransactionResult {
-        let goal_owner_pubkey = goal_owner.pubkey();
+        let session_owner_pubkey = session_owner.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
-        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
-        let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
-        let (owner_contribution_pda, _) = self.find_contribution_pda(&goal_pda, &goal_owner_pubkey);
+        let (session_pda, _) = self.find_session_pda(&network_config_pda, session_slot_id);
+        let (vault_pda, _) = self.find_session_vault_pda(&session_pda);
+        let (owner_contribution_pda, _) =
+            self.find_contribution_pda(&session_pda, &session_owner_pubkey);
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
         let (agent_pda, _) = self.find_agent_pda(&network_config_pda, agent_slot_id);
 
-        let mut builder = SetGoalBuilder::new();
+        let mut builder = SetSessionBuilder::new();
         builder
-            .owner(goal_owner_pubkey)
-            .goal(goal_pda)
+            .owner(session_owner_pubkey)
+            .session(session_pda)
             .vault(vault_pda)
             .owner_contribution(owner_contribution_pda)
             .task(task_pda)
@@ -400,28 +399,30 @@ impl Instructions for TestFixture {
             .network_config(network_config_pda)
             .specification_cid(specification_cid)
             .max_iterations(max_iterations)
-            .initial_deposit(initial_deposit);
+            .initial_deposit(initial_deposit)
+            .compute_node(compute_node)
+            .task_type(task_type);
 
         self.svm
-            .send_tx(&[builder.instruction()], &goal_owner_pubkey, &[goal_owner])
+            .send_tx(&[builder.instruction()], &session_owner_pubkey, &[session_owner])
     }
 
-    fn contribute_to_goal(
+    fn contribute_to_session(
         &mut self,
         contributor: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         deposit_amount: u64,
     ) -> TransactionResult {
         let contributor_pubkey = contributor.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
-        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
-        let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
-        let (contribution_pda, _) = self.find_contribution_pda(&goal_pda, &contributor_pubkey);
+        let (session_pda, _) = self.find_session_pda(&network_config_pda, session_slot_id);
+        let (vault_pda, _) = self.find_session_vault_pda(&session_pda);
+        let (contribution_pda, _) = self.find_contribution_pda(&session_pda, &contributor_pubkey);
 
-        let mut builder = ContributeToGoalBuilder::new();
+        let mut builder = ContributeToSessionBuilder::new();
         builder
             .contributor(contributor_pubkey)
-            .goal(goal_pda)
+            .session(session_pda)
             .vault(vault_pda)
             .contribution(contribution_pda)
             .network_config(network_config_pda)
@@ -434,22 +435,22 @@ impl Instructions for TestFixture {
         )
     }
 
-    fn withdraw_from_goal(
+    fn withdraw_from_session(
         &mut self,
         contributor: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         shares_to_burn: u64,
     ) -> TransactionResult {
         let contributor_pubkey = contributor.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
-        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
-        let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
-        let (contribution_pda, _) = self.find_contribution_pda(&goal_pda, &contributor_pubkey);
+        let (session_pda, _) = self.find_session_pda(&network_config_pda, session_slot_id);
+        let (vault_pda, _) = self.find_session_vault_pda(&session_pda);
+        let (contribution_pda, _) = self.find_contribution_pda(&session_pda, &contributor_pubkey);
 
-        let mut builder = WithdrawFromGoalBuilder::new();
+        let mut builder = WithdrawFromSessionBuilder::new();
         builder
             .contributor(contributor_pubkey)
-            .goal(goal_pda)
+            .session(session_pda)
             .vault(vault_pda)
             .contribution(contribution_pda)
             .network_config(network_config_pda)
@@ -465,26 +466,26 @@ impl Instructions for TestFixture {
     fn claim_task(
         &mut self,
         compute_node: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         task_slot_id: u64,
         max_task_cost: u64,
+        max_call_count: u64,
     ) -> TransactionResult {
         let compute_node_pubkey = compute_node.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
-        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+        let (session_pda, _) = self.find_session_pda(&network_config_pda, session_slot_id);
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
-        let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
-        let (compute_node_info_pda, _) = self.find_node_info_pda(&compute_node_pubkey);
+        let (vault_pda, _) = self.find_session_vault_pda(&session_pda);
 
         let mut builder = ClaimTaskBuilder::new();
         builder
             .compute_node(compute_node_pubkey)
             .task(task_pda)
-            .goal(goal_pda)
+            .session(session_pda)
             .vault(vault_pda)
-            .compute_node_info(compute_node_info_pda)
             .network_config(network_config_pda)
-            .max_task_cost(max_task_cost);
+            .max_task_cost(max_task_cost)
+            .max_call_count(max_call_count);
 
         self.svm.send_tx(
             &[builder.instruction()],
@@ -496,40 +497,32 @@ impl Instructions for TestFixture {
     fn submit_task_result(
         &mut self,
         compute_node: &Keypair,
+        session_slot_id: u64,
         task_slot_id: u64,
         input_cid: String,
         output_cid: String,
+        state_cid: Option<String>,
+        call_count: u64,
     ) -> TransactionResult {
         let compute_node_pubkey = compute_node.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
-
-        // Goal has task field, so find goal by checking which goal has this task
-        let network_config = self.get_network_config();
-        let mut goal_slot_id = None;
-        for i in 0..network_config.goal_count {
-            let (test_goal_pda, _) = self.find_goal_pda(&network_config_pda, i);
-            let goal_account = self.svm.get_account(&test_goal_pda);
-            if let Some(acc) = goal_account {
-                use dac_client::accounts::Goal;
-                let goal = Goal::from_bytes(&acc.data).expect("Failed to deserialize Goal");
-                if goal.task == task_pda {
-                    goal_slot_id = Some(i);
-                    break;
-                }
-            }
-        }
-        let goal_slot_id = goal_slot_id.expect("Goal not found for task");
-        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+        let (session_pda, _) = self.find_session_pda(&network_config_pda, session_slot_id);
 
         let mut builder = SubmitTaskResultBuilder::new();
         builder
             .compute_node(compute_node_pubkey)
             .task(task_pda)
-            .goal(goal_pda)
+            .session(session_pda)
             .network_config(network_config_pda)
             .input_cid(input_cid)
             .output_cid(output_cid);
+
+        if let Some(state_cid_str) = state_cid {
+            builder.state_cid(state_cid_str);
+        }
+
+        builder.call_count(call_count);
 
         self.svm.send_tx(
             &[builder.instruction()],
@@ -541,16 +534,16 @@ impl Instructions for TestFixture {
     fn submit_confidential_task_validation(
         &mut self,
         node_validating: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         task_slot_id: u64,
         compute_node_pubkey: &Pubkey,
         ed25519_ix: &Instruction,
     ) -> TransactionResult {
         let validator_pubkey = node_validating.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
-        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+        let (session_pda, _) = self.find_session_pda(&network_config_pda, session_slot_id);
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
-        let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
+        let (vault_pda, _) = self.find_session_vault_pda(&session_pda);
         let (compute_node_info_pda, _) = self.find_node_info_pda(compute_node_pubkey);
         let (node_treasury_pda, _) = self.find_node_treasury_pda(&compute_node_info_pda);
         let (validator_node_info_pda, _) = self.find_node_info_pda(&validator_pubkey);
@@ -558,7 +551,7 @@ impl Instructions for TestFixture {
         let mut builder = SubmitConfidentialTaskValidationBuilder::new();
         builder
             .node_validating(validator_pubkey)
-            .goal(goal_pda)
+            .session(session_pda)
             .vault(vault_pda)
             .task(task_pda)
             .node_info(compute_node_info_pda)
@@ -579,18 +572,18 @@ impl Instructions for TestFixture {
     fn submit_public_task_validation(
         &mut self,
         node_validating: &Keypair,
-        goal_slot_id: u64,
+        session_slot_id: u64,
         task_slot_id: u64,
         compute_node_pubkey: &Pubkey,
         payment_amount: u64,
         approved: bool,
-        goal_completed: bool,
+        session_completed: bool,
     ) -> TransactionResult {
         let node_validating_pubkey = node_validating.pubkey();
         let network_config_pda = self.find_network_config_pda().0;
-        let (goal_pda, _) = self.find_goal_pda(&network_config_pda, goal_slot_id);
+        let (session_pda, _) = self.find_session_pda(&network_config_pda, session_slot_id);
         let (task_pda, _) = self.find_task_pda(&network_config_pda, task_slot_id);
-        let (vault_pda, _) = self.find_goal_vault_pda(&goal_pda);
+        let (vault_pda, _) = self.find_session_vault_pda(&session_pda);
         let (compute_node_info_pda, _) = self.find_node_info_pda(compute_node_pubkey);
         let (node_treasury_pda, _) = self.find_node_treasury_pda(&compute_node_info_pda);
         let (node_validating_info_pda, _) = self.find_node_info_pda(&node_validating_pubkey);
@@ -598,7 +591,7 @@ impl Instructions for TestFixture {
         let mut builder = SubmitPublicTaskValidationBuilder::new();
         builder
             .node_validating(node_validating_pubkey)
-            .goal(goal_pda)
+            .session(session_pda)
             .vault(vault_pda)
             .task(task_pda)
             .node_info(compute_node_info_pda)
@@ -608,7 +601,7 @@ impl Instructions for TestFixture {
             .instruction_sysvar(solana_sdk::sysvar::instructions::id())
             .payment_amount(payment_amount)
             .approved(approved)
-            .goal_completed(goal_completed);
+            .goal_completed(session_completed);
 
         let validate_ix = builder.instruction();
 

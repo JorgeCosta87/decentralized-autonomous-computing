@@ -21,6 +21,8 @@ pub struct TestFixture {
     // Keypairs for testing
     pub public_node_owner: Keypair,
     pub public_node: Keypair,
+    pub validator_node_owner: Keypair,
+    pub validator_node: Keypair,
     pub confidential_node_owner: Keypair,
     pub confidential_node: Keypair,
     pub tee_signing_keypair: Keypair,
@@ -51,6 +53,14 @@ impl TestFixture {
         svm.airdrop(&public_node.pubkey(), 10 * LAMPORTS_PER_SOL)
             .expect("Failed to fund public_node");
 
+        let validator_node_owner = Keypair::new();
+        svm.airdrop(&validator_node_owner.pubkey(), 10 * LAMPORTS_PER_SOL)
+            .expect("Failed to fund validator_node_owner");
+
+        let validator_node = Keypair::new();
+        svm.airdrop(&validator_node.pubkey(), 10 * LAMPORTS_PER_SOL)
+            .expect("Failed to fund validator_node");
+
         let confidential_node_owner = Keypair::new();
         svm.airdrop(&confidential_node_owner.pubkey(), 10 * LAMPORTS_PER_SOL)
             .expect("Failed to fund confidential_node_owner");
@@ -58,14 +68,6 @@ impl TestFixture {
         let confidential_node = Keypair::new();
         svm.airdrop(&confidential_node.pubkey(), 10 * LAMPORTS_PER_SOL)
             .expect("Failed to fund confidential_node");
-
-        let public_node_owner = Keypair::new();
-        svm.airdrop(&public_node_owner.pubkey(), 10 * LAMPORTS_PER_SOL)
-            .expect("Failed to fund public_node_owner");
-
-        let public_node = Keypair::new();
-        svm.airdrop(&public_node.pubkey(), 10 * LAMPORTS_PER_SOL)
-            .expect("Failed to fund public_node");
 
         let tee_signing_keypair = Keypair::new();
 
@@ -84,6 +86,8 @@ impl TestFixture {
             authority,
             public_node_owner,
             public_node,
+            validator_node_owner,
+            validator_node,
             confidential_node_owner,
             confidential_node,
             tee_signing_keypair,
@@ -103,17 +107,13 @@ impl TestFixture {
     pub fn with_initialize_network(mut self) -> Self {
         let network_config_pda = self.find_network_config_pda().0;
 
-        let remaining_accounts = self.create_remaining_accounts_for_initialize(
-            &network_config_pda,
-            DEFAULT_ALLOCATE_GOALS,
-            DEFAULT_ALLOCATE_TASKS,
-        );
+        let remaining_accounts =
+            self.create_remaining_accounts_for_initialize(&network_config_pda, DEFAULT_ALLOCATE_TASKS);
 
         let result = self.initialize_network(
             &self.authority.insecure_clone(),
             &network_config_pda,
             DEFAULT_CID_CONFIG.to_string(),
-            DEFAULT_ALLOCATE_GOALS,
             DEFAULT_ALLOCATE_TASKS,
             DEFAULT_APPROVED_CODE_MEASUREMENTS.to_vec(),
             crate::setup::test_data::DEFAULT_REQUIRED_VALIDATIONS,
@@ -161,6 +161,39 @@ impl TestFixture {
             tee_signing_pubkey,
         );
         assert!(result.is_ok(), "Failed to claim confidential node");
+        self
+    }
+
+    pub fn with_validate_public_node(mut self, approved: bool) -> Self {
+        let validator = self.confidential_node.insecure_clone();
+        let node_to_validate = self.public_node.pubkey();
+        let result = self.validate_public_node(&validator, &node_to_validate, approved);
+        assert!(result.is_ok(), "Failed to validate public node");
+        self
+    }
+
+    pub fn with_register_validator_node(mut self) -> Self {
+        let result = self.register_node(
+            &self.validator_node_owner.insecure_clone(),
+            &self.validator_node.pubkey(),
+            NodeType::Public,
+        );
+        assert!(result.is_ok(), "Failed to register validator node");
+        self
+    }
+
+    pub fn with_claim_validator_node(mut self) -> Self {
+        let result =
+            self.claim_compute_node(&self.validator_node.insecure_clone(), DEFAULT_NODE_INFO_CID.to_string());
+        assert!(result.is_ok(), "Failed to claim validator node");
+        self
+    }
+
+    pub fn with_validate_validator_node(mut self, approved: bool) -> Self {
+        let validator = self.confidential_node.insecure_clone();
+        let node_to_validate = self.validator_node.pubkey();
+        let result = self.validate_public_node(&validator, &node_to_validate, approved);
+        assert!(result.is_ok(), "Failed to validate validator node");
         self
     }
 
@@ -239,57 +272,90 @@ impl TestFixture {
         self
     }
 
-    pub fn with_create_goal(mut self, is_confidential: bool) -> Self {
-        let goal_owner = self.agent_owner.insecure_clone();
-        let result = self.create_goal(&goal_owner, true, is_confidential);
-        assert!(result.is_ok(), "Failed to create goal");
+    pub fn with_create_session(mut self, is_confidential: bool) -> Self {
+        let owner = self.agent_owner.insecure_clone();
+        let result = self.create_session(&owner, true, is_confidential);
+        assert!(result.is_ok(), "Failed to create session");
         self
     }
 
-    pub fn with_set_goal(mut self, goal_slot_id: u64, agent_slot_id: u64) -> Self {
-        let goal_owner = self.agent_owner.insecure_clone();
+    pub fn with_set_session_using_public_compute(
+        self,
+        session_slot_id: u64,
+        agent_slot_id: u64,
+        task_type: dac_client::TaskType,
+    ) -> Self {
+        let compute_node = self.public_node.pubkey();
+        self.with_set_session(session_slot_id, agent_slot_id, compute_node, task_type)
+    }
+
+    pub fn with_set_session_for_confidential(
+        self,
+        agent_slot_id: u64,
+        task_type: dac_client::TaskType,
+    ) -> Self {
+        let session_slot_id = self.get_network_config().session_count - 1;
+        let compute_node = self.confidential_node.pubkey();
+        self.with_set_session(session_slot_id, agent_slot_id, compute_node, task_type)
+    }
+
+    pub fn with_set_session(
+        mut self,
+        session_slot_id: u64,
+        agent_slot_id: u64,
+        compute_node: Pubkey,
+        task_type: dac_client::TaskType,
+    ) -> Self {
+        let session_owner = self.agent_owner.insecure_clone();
         let network_config_pda = self.find_network_config_pda().0;
-        let goal = self.get_goal(&network_config_pda, goal_slot_id);
+        let session = self.get_session(&network_config_pda, session_slot_id);
 
         let network_config = self.get_network_config();
         let mut task_slot_id = 0;
 
         for i in 0..network_config.task_count {
             let (task_pda, _) = self.find_task_pda(&network_config_pda, i);
-            if task_pda == goal.task {
+            if task_pda == session.task {
                 task_slot_id = i;
                 break;
             }
         }
-        
-        let result = self.set_goal(
-            &goal_owner,
-            goal_slot_id,
+
+        let result = self.set_session(
+            &session_owner,
+            session_slot_id,
             crate::setup::test_data::DEFAULT_GOAL_SPECIFICATION_CID.to_string(),
             10,
             agent_slot_id,
             task_slot_id,
             DEFAULT_INITIAL_DEPOSIT,
+            compute_node,
+            task_type,
         );
-        assert!(result.is_ok(), "Failed to set goal");
+        assert!(result.is_ok(), "Failed to set session");
         self
     }
 
-    pub fn with_contribute_to_goal(mut self, goal_slot_id: u64, deposit_amount: u64) -> Self {
-        let contributor = self.contributor.insecure_clone();
-        let result = self.contribute_to_goal(&contributor, goal_slot_id, deposit_amount);
-        assert!(result.is_ok(), "Failed to contribute to goal");
-        self
-    }
-
-    pub fn with_withdraw_from_goal(
+    pub fn with_contribute_to_session(
         mut self,
-        goal_slot_id: u64,
+        session_slot_id: u64,
+        deposit_amount: u64,
+    ) -> Self {
+        let contributor = self.contributor.insecure_clone();
+        let result =
+            self.contribute_to_session(&contributor, session_slot_id, deposit_amount);
+        assert!(result.is_ok(), "Failed to contribute to session");
+        self
+    }
+
+    pub fn with_withdraw_from_session(
+        mut self,
+        session_slot_id: u64,
         contributor: &Keypair,
         shares_to_burn: u64,
     ) -> Self {
-        let result = self.withdraw_from_goal(contributor, goal_slot_id, shares_to_burn);
-        assert!(result.is_ok(), "Failed to withdraw from goal");
+        let result = self.withdraw_from_session(contributor, session_slot_id, shares_to_burn);
+        assert!(result.is_ok(), "Failed to withdraw from session");
         self
     }
 }
